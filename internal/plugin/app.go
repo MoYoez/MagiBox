@@ -36,6 +36,10 @@ func Setup(b *tele.Bot, c *cron.Cron) error {
 	var menu []tele.Command
 
 	for _, p := range All() {
+		if !Enabled(p.Name()) {
+			log.Printf("[skip] 插件 %s 已禁用", p.Name())
+			continue
+		}
 		for _, cmd := range p.Commands() {
 			b.Handle("/"+cmd.Name, cmd.Handler, cmd.Middleware...)
 			menu = append(menu, tele.Command{Text: cmd.Name, Description: cmd.Description})
@@ -69,6 +73,9 @@ func Setup(b *tele.Bot, c *cron.Cron) error {
 	cmdMu.Unlock()
 
 	for _, p := range All() {
+		if !Enabled(p.Name()) {
+			continue
+		}
 		if w, ok := p.(Wirer); ok {
 			w.Wire(b)
 			log.Printf("[wire] 已接线消息 handler  <- %s", p.Name())

@@ -1,7 +1,29 @@
 // Package config reads runtime configuration from environment variables.
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
+
+// PluginsMode returns the plugin filter mode from PLUGINS_MODE:
+// "blacklist" (default; list = disabled) or "whitelist" (list = only enabled).
+func PluginsMode() string {
+	if m := os.Getenv("PLUGINS_MODE"); m != "" {
+		return m
+	}
+	return "blacklist"
+}
+
+// PluginsList returns the comma-separated plugin names from PLUGINS_LIST
+// used by the filter (nil when unset).
+func PluginsList() []string {
+	v := os.Getenv("PLUGINS_LIST")
+	if v == "" {
+		return nil
+	}
+	return strings.Split(v, ",")
+}
 
 // Token returns the bot token issued by @BotFather (required).
 func Token() string { return os.Getenv("BOT_TOKEN") }

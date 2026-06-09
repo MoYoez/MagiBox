@@ -11,8 +11,8 @@ import (
 
 // Plugins should auto-register into the registry via init() at import time.
 func TestPluginsSelfRegister(t *testing.T) {
-	if n := len(plugin.All()); n != 7 {
-		t.Fatalf("已注册插件 = %d,期望 7(echo/ping/heartbeat/bind/perm/playground/bundle)", n)
+	if n := len(plugin.All()); n != 6 {
+		t.Fatalf("已注册插件 = %d,期望 6(echo/ping/bind/perm/playground/bundle)", n)
 	}
 }
 
@@ -43,16 +43,11 @@ func TestCommandsCollected(t *testing.T) {
 // (without Start, nothing actually runs).
 func TestJobSpecsValid(t *testing.T) {
 	c := cron.New()
-	jobs := 0
 	for _, p := range plugin.All() {
 		for _, j := range p.Jobs() {
-			jobs++
 			if _, err := c.AddFunc(j.Spec, func() {}); err != nil {
 				t.Errorf("插件 %s 的任务 %q spec 非法 (%s): %v", p.Name(), j.Name, j.Spec, err)
 			}
 		}
-	}
-	if jobs == 0 {
-		t.Fatal("没有收集到任何定时任务")
 	}
 }

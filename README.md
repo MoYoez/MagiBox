@@ -49,7 +49,7 @@ docker run -d --name magibox \
 
 **会话打包(`/bundle`)** — `start` 到 `end` 之间的消息会被打包成一个随机链接,无法被猜测或枚举。浏览器打开是白底圆角的聊天页面;curl 或加 `?format=json` 拿到结构化 JSON,可以直接交给 AI 处理。图片、sticker 和 20MB 以内的视频会下载并内嵌展示,文件类消息不收。
 
-**在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,心跳和巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
+**在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
 
 ## 配置
 
@@ -60,6 +60,7 @@ docker run -d --name magibox \
 | `BUNDLE_ADDR` | `:8099` | bundle 服务监听地址 |
 | `BUNDLE_BASE_URL` | `http://localhost:8099` | 生成链接时的前缀 |
 | `BUNDLE_MEDIA_DIR` | `bundle-media` | 媒体文件目录 |
+| `PLUGINS_MODE` / `PLUGINS_LIST` | `blacklist` / 空 | 插件开关:blacklist=列表里的禁用,whitelist=只启用列表里的;逗号分隔,如 `PLUGINS_LIST=echo,bundle` |
 | `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` | `*.json` | 各持久化文件路径 |
 
 监听地址和链接前缀是分开的:套反向代理时,可以只监听 `127.0.0.1:8099`,把 `BUNDLE_BASE_URL` 设成对外的 https 域名。

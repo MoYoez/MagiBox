@@ -62,6 +62,8 @@ func main() {
 	}()
 
 	c := cron.New()
+	// Apply the plugin on/off filter (blacklist or whitelist) before wiring.
+	plugin.SetFilter(config.PluginsMode(), config.PluginsList())
 	if err := plugin.Setup(b, c); err != nil {
 		log.Fatal(err)
 	}
