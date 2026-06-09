@@ -47,3 +47,39 @@ func TestExpandVars(t *testing.T) {
 		t.Fatalf("删除后应回退 env, got %q", got)
 	}
 }
+
+func TestMissingVars(t *testing.T) {
+	if err := InitVars(filepath.Join(t.TempDir(), "vars.json")); err != nil {
+		t.Fatal(err)
+	}
+	g := &Group{
+		BaseURL:  "https://api.x",
+		Endpoint: "/v1?city={{city}}&key={{mv_api_key}}",
+		Headers:  map[string]string{"Authorization": "Bearer {{mv_token}}"},
+	}
+
+	// nothing resolvable → all three reported (sorted, deduped)
+	if got := MissingVars(g, nil); len(got) != 3 ||
+		got[0] != "city" || got[1] != "mv_api_key" || got[2] != "mv_token" {
+		t.Fatalf("missing = %v, 期望 [city mv_api_key mv_token]", got)
+	}
+
+	// runtime override fills one
+	if got := MissingVars(g, map[string]string{"city": "sh"}); len(got) != 2 {
+		t.Fatalf("override 后 missing = %v", got)
+	}
+
+	// variable table fills another
+	if err := SetVar("mv_token", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if got := MissingVars(g, map[string]string{"city": "sh"}); len(got) != 1 || got[0] != "mv_api_key" {
+		t.Fatalf("变量表后 missing = %v", got)
+	}
+
+	// env var fills the last one
+	t.Setenv("mv_api_key", "k")
+	if got := MissingVars(g, map[string]string{"city": "sh"}); len(got) != 0 {
+		t.Fatalf("全部可解析时应为空, got %v", got)
+	}
+}

@@ -35,9 +35,11 @@ const usage = `playground 用法(/pg <子命令>):
   assert <组> list | clear
   var set <键> <值> | del <键> | list
 
-模板占位符:{body_code} {body_raw} {body_image}
+模板占位符:{body_code} {body_raw} {body_image} {body_file}
   {body_jsonlize_spec["a"]["b"]}  —— 按路径取 JSON 字段
+  {body_file["报告.html"]}        —— 响应体存成文件发送(可改名;不写名按 Content-Type 自动起)
 变量:baseurl/endpoint/header/body 里用 {{键}} 引用(/pg var 设置;回退同名环境变量)
+  解析不到的 {{键}} 视为需手动填写,运行时会提示补参
 每个子命令也有独立命令:/pg_run /pg_sched /pg_set ...(输 / 有补全,参数相同)
 分组本身也是命令:组名为 a-z0-9_ 时,/组名 [键=值 ...] ≡ /pg run 组名`
 
@@ -403,23 +405,57 @@ func handleRun(c tele.Context, name string, kv []string) error {
 	if g.BaseURL == "" {
 		return c.Send("请先设置 baseurl:/pg set " + name + " baseurl <url>")
 	}
+	overrides := parseKV(kv)
+	// Unresolved {{vars}} mean the caller must fill them in manually —
+	// prompt with concrete usage instead of firing a broken request.
+	if missing := pg.MissingVars(g, overrides); len(missing) > 0 {
+		parts := make([]string, len(missing))
+		for i, m := range missing {
+			parts[i] = m + "=<值>"
+		}
+		hint := "/pg run " + name + " " + strings.Join(parts, " ")
+		if cmdNameRe.MatchString(name) {
+			hint = "/" + name + " " + strings.Join(parts, " ")
+		}
+		return c.Send("该分组需要手动填写参数:" + strings.Join(missing, ", ") + "\n用法:" + hint)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	resp, err := pg.Execute(ctx, g, parseKV(kv))
+	resp, err := pg.Execute(ctx, g, overrides)
 	if err != nil {
 		return c.Send("请求失败:" + err.Error())
 	}
-	text, image := pg.Render(g.Template, resp)
+	text, image, file := pg.Render(g.Template, resp)
 	if image != nil {
 		photo := &tele.Photo{File: tele.FromReader(bytes.NewReader(image))}
 		photo.Caption = clip(text, 1000)
 		return c.Send(photo)
 	}
+	if file != nil {
+		doc := &tele.Document{File: tele.FromReader(bytes.NewReader(file.Data))}
+		doc.FileName = fileName(file, g, resp)
+		doc.Caption = clip(text, 1000)
+		return c.Send(doc)
+	}
 	if text == "" {
 		text = "(空响应)"
 	}
 	return c.Send(clip(text, 4000))
+}
+
+// fileName resolves a {body_file} attachment name: the custom name from the
+// template if given, otherwise "<group><ext>" derived from the Content-Type.
+func fileName(f *pg.FileOut, g *pg.Group, resp *pg.Response) string {
+	if f.Name != "" {
+		return f.Name
+	}
+	ct := ""
+	if resp.Header != nil {
+		ct = resp.Header.Get("Content-Type")
+	}
+	return g.Name + pg.ExtByContentType(ct)
 }
 
 // parseKV parses ["k=v", ...] into a temporary variable map for this call.
@@ -445,6 +481,7 @@ func notify(b *tele.Bot, g *pg.Group, ev pg.CheckEvent, resp *pg.Response, failu
 	}
 	var text string
 	var image []byte
+	var file *pg.FileOut
 	switch ev {
 	case pg.EventFail:
 		text = "⚠️ 巡检失败 [" + g.Name + "]\n" + strings.Join(failures, "\n")
@@ -452,18 +489,24 @@ func notify(b *tele.Bot, g *pg.Group, ev pg.CheckEvent, resp *pg.Response, failu
 		text = "✅ 已恢复 [" + g.Name + "]"
 	case pg.EventReport:
 		if resp != nil {
-			text, image = pg.Render(g.Template, resp)
+			text, image, file = pg.Render(g.Template, resp)
 		}
 		text = "🔔 [" + g.Name + "]\n" + text
 	default:
 		return
 	}
 	for _, id := range admins {
-		if image != nil {
+		switch {
+		case image != nil:
 			photo := &tele.Photo{File: tele.FromReader(bytes.NewReader(image))}
 			photo.Caption = clip(text, 1000)
 			_, _ = b.Send(tele.ChatID(id), photo)
-		} else {
+		case file != nil:
+			doc := &tele.Document{File: tele.FromReader(bytes.NewReader(file.Data))}
+			doc.FileName = fileName(file, g, resp)
+			doc.Caption = clip(text, 1000)
+			_, _ = b.Send(tele.ChatID(id), doc)
+		default:
 			_, _ = b.Send(tele.ChatID(id), clip(text, 4000))
 		}
 	}

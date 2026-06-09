@@ -115,3 +115,30 @@ func expandVarsWith(s string, overrides map[string]string) string {
 
 // expandVars is the convenience form without runtime args.
 func expandVars(s string) string { return expandVarsWith(s, nil) }
+
+// MissingVars returns the {{var}} names referenced by the group's request
+// fields (baseurl, endpoint, headers, body) that cannot be resolved from
+// overrides, the variable table, or the environment — i.e. the arguments
+// the caller still has to fill in manually.
+func MissingVars(g *Group, overrides map[string]string) []string {
+	fields := []string{g.BaseURL, g.Endpoint, g.Body}
+	for _, v := range g.Headers {
+		fields = append(fields, v)
+	}
+	seen := map[string]bool{}
+	var missing []string
+	for _, f := range fields {
+		for _, m := range varRe.FindAllStringSubmatch(f, -1) {
+			name := m[1]
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			if _, ok := resolveVarWith(name, overrides); !ok {
+				missing = append(missing, name)
+			}
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}

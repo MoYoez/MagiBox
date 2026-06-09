@@ -16,40 +16,52 @@ var (
 	fallbackRe    = regexp.MustCompile(`^(.*?)\s*\|\|\s*"([^"]*)"\s*$`)
 )
 
+// FileOut is a file attachment produced by {body_file}: the response body
+// plus an optional custom filename (empty = let the caller derive one from
+// the response Content-Type).
+type FileOut struct {
+	Name string
+	Data []byte
+}
+
 // Render fills the template with the response. It returns the rendered text;
-// if the template contains {body_image}, it also returns the image bytes
-// (the text then serves as the image caption).
+// if the template contains {body_image}, it also returns the image bytes,
+// and if it contains {body_file}, a file attachment (the text then serves
+// as the caption).
 //
 // Supported placeholders:
 //
 //	{body_raw}                            raw response body
 //	{body_code}                           HTTP status code
 //	{body_image}                          send the response body as an image
+//	{body_file}                           send the response body as a file (auto-named)
+//	{body_file["report.html"]}            same, with a custom filename
 //	{body_jsonlize_spec["a"]["b"][0]}     JSON path lookup (object keys + array indexes)
 //	{body_header["Content-Type"]}         read a response header
 //	{<expr> || "fallback"}                use the fallback value if evaluation fails
-func Render(tmpl string, r *Response) (text string, image []byte) {
+func Render(tmpl string, r *Response) (text string, image []byte, file *FileOut) {
 	text = placeholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
 		inner := strings.TrimSpace(m[1 : len(m)-1])
 		expr, fallback, hasFallback := splitFallback(inner)
 		if !isKnownExpr(expr) {
 			return m // keep unknown placeholders as-is
 		}
-		val, ok := evalExpr(expr, r, &image)
+		val, ok := evalExpr(expr, r, &image, &file)
 		if !ok && hasFallback {
 			return fallback
 		}
 		return val
 	})
-	return strings.TrimSpace(text), image
+	return strings.TrimSpace(text), image, file
 }
 
 func isKnownExpr(expr string) bool {
 	return expr == "body_raw" || expr == "body_code" || expr == "body_image" ||
+		strings.HasPrefix(expr, "body_file") ||
 		strings.HasPrefix(expr, "body_jsonlize_spec") || strings.HasPrefix(expr, "body_header")
 }
 
-func evalExpr(expr string, r *Response, image *[]byte) (string, bool) {
+func evalExpr(expr string, r *Response, image *[]byte, file **FileOut) (string, bool) {
 	switch {
 	case expr == "body_raw":
 		return string(r.Body), true
@@ -58,12 +70,53 @@ func evalExpr(expr string, r *Response, image *[]byte) (string, bool) {
 	case expr == "body_image":
 		*image = r.Body
 		return "", true
+	case strings.HasPrefix(expr, "body_file"):
+		f := &FileOut{Data: r.Body}
+		if mm := segRe.FindStringSubmatch(expr); mm != nil {
+			name := strings.TrimSpace(mm[1])
+			if len(name) >= 2 && name[0] == '"' && name[len(name)-1] == '"' {
+				name = name[1 : len(name)-1]
+			}
+			f.Name = name
+		}
+		*file = f
+		return "", true
 	case strings.HasPrefix(expr, "body_jsonlize_spec"):
 		return jsonPath(r.Body, expr)
 	case strings.HasPrefix(expr, "body_header"):
 		return headerValue(r.Header, expr)
 	default:
 		return "", false
+	}
+}
+
+// ExtByContentType maps a response Content-Type to a file extension,
+// used to auto-name {body_file} attachments.
+func ExtByContentType(ct string) string {
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	switch strings.TrimSpace(strings.ToLower(ct)) {
+	case "text/html":
+		return ".html"
+	case "application/json":
+		return ".json"
+	case "text/csv":
+		return ".csv"
+	case "text/plain":
+		return ".txt"
+	case "application/xml", "text/xml":
+		return ".xml"
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "application/pdf":
+		return ".pdf"
+	default:
+		return ".bin"
 	}
 }
 

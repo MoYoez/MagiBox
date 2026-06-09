@@ -18,7 +18,7 @@ type Assert struct {
 func EvalAsserts(asserts []Assert, r *Response) []string {
 	var fails []string
 	for _, a := range asserts {
-		got, _ := Render(a.Expr, r)
+		got, _, _ := Render(a.Expr, r)
 		ok := false
 		switch a.Op {
 		case "!=":

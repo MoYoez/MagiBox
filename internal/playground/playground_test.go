@@ -10,7 +10,7 @@ import (
 func TestRender(t *testing.T) {
 	r := &Response{Code: 200, Body: []byte(`{"code":0,"data":{"name":"张三","age":18},"list":["a","b"]}`)}
 
-	text, img := Render(`状态={body_code} 名字={body_jsonlize_spec["data"]["name"]} 年龄={body_jsonlize_spec["data"]["age"]}`, r)
+	text, img, _ := Render(`状态={body_code} 名字={body_jsonlize_spec["data"]["name"]} 年龄={body_jsonlize_spec["data"]["age"]}`, r)
 	if img != nil {
 		t.Fatal("不应有图片")
 	}
@@ -19,29 +19,64 @@ func TestRender(t *testing.T) {
 	}
 
 	// array index
-	if text, _ := Render(`{body_jsonlize_spec["list"][1]}`, r); text != "b" {
+	if text, _, _ := Render(`{body_jsonlize_spec["list"][1]}`, r); text != "b" {
 		t.Fatalf("数组下标 got %q", text)
 	}
 	// fallback value (missing field → fallback)
-	if text, _ := Render(`{body_jsonlize_spec["nope"] || "—"}`, r); text != "—" {
+	if text, _, _ := Render(`{body_jsonlize_spec["nope"] || "—"}`, r); text != "—" {
 		t.Fatalf("兜底 got %q", text)
 	}
 	// response header
 	rh := &Response{Code: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{}`)}
-	if text, _ := Render(`{body_header["Content-Type"]}`, rh); text != "application/json" {
+	if text, _, _ := Render(`{body_header["Content-Type"]}`, rh); text != "application/json" {
 		t.Fatalf("响应头 got %q", text)
 	}
 	// raw body
-	if text, _ := Render(`{body_raw}`, r); text != string(r.Body) {
+	if text, _, _ := Render(`{body_raw}`, r); text != string(r.Body) {
 		t.Fatalf("raw 不匹配: %q", text)
 	}
 	// image
-	if _, img := Render(`look {body_image}`, &Response{Body: []byte{1, 2, 3}}); img == nil {
+	if _, img, _ := Render(`look {body_image}`, &Response{Body: []byte{1, 2, 3}}); img == nil {
 		t.Fatal("应识别 body_image")
 	}
 	// missing field without fallback → error hint
-	if text, _ := Render(`{body_jsonlize_spec["nope"]}`, r); !strings.Contains(text, "缺字段") {
+	if text, _, _ := Render(`{body_jsonlize_spec["nope"]}`, r); !strings.Contains(text, "缺字段") {
 		t.Fatalf("应提示缺字段, got %q", text)
+	}
+}
+
+func TestRenderFile(t *testing.T) {
+	rf := &Response{
+		Code:   200,
+		Header: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:   []byte("<h1>hi</h1>"),
+	}
+
+	// {body_file} without a name: data captured, name left for the caller
+	text, _, f := Render(`done {body_file}`, rf)
+	if f == nil || string(f.Data) != "<h1>hi</h1>" || f.Name != "" {
+		t.Fatalf("body_file 解析错误: %+v", f)
+	}
+	if text != "done" {
+		t.Fatalf("占位符应从文本移除, got %q", text)
+	}
+
+	// custom filename
+	_, _, f2 := Render(`{body_file["report.html"]}`, rf)
+	if f2 == nil || f2.Name != "report.html" {
+		t.Fatalf("自定义文件名错误: %+v", f2)
+	}
+
+	// extension mapping for auto-naming
+	for ct, want := range map[string]string{
+		"text/html; charset=utf-8": ".html",
+		"application/json":         ".json",
+		"text/csv":                 ".csv",
+		"application/octet-stream": ".bin",
+	} {
+		if got := ExtByContentType(ct); got != want {
+			t.Errorf("ExtByContentType(%q) = %q, 期望 %q", ct, got, want)
+		}
 	}
 }
 

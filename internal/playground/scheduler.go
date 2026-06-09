@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -141,17 +142,23 @@ func runCheck(name string) {
 	if cb == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	// Checks carry the schedule-level args (configured via /pg sched),
-	// equivalent to a manual /pg run <group> key=value.
-	resp, err := Execute(ctx, g, g.ScheduleArgs)
+	var resp *Response
 	var failures []string
-	if err != nil {
-		failures = []string{"请求失败: " + err.Error()}
+	if missing := MissingVars(g, g.ScheduleArgs); len(missing) > 0 {
+		// Unresolved {{vars}}: report instead of firing a broken request.
+		failures = []string{"缺少参数: " + strings.Join(missing, ", ") + "(用 /pg sched <组> <cron> 键=值 补上)"}
 	} else {
-		failures = EvalAsserts(g.Asserts, resp)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		// Checks carry the schedule-level args (configured via /pg sched),
+		// equivalent to a manual /pg run <group> key=value.
+		var err error
+		resp, err = Execute(ctx, g, g.ScheduleArgs)
+		if err != nil {
+			failures = []string{"请求失败: " + err.Error()}
+		} else {
+			failures = EvalAsserts(g.Asserts, resp)
+		}
 	}
 
 	ev := def.classify(name, g, failures)
