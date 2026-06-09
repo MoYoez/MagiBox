@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+*.md
+auth.json
+playground.json
+vars.json
+bundles.json
+bundle-media/
+preview.html
+Dockerfile
+.dockerignore

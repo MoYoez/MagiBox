@@ -1,0 +1,14 @@
+services:
+  magibox:
+    build: .
+    image: magibox
+    container_name: magibox
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8099:8099"
+    volumes:
+      - magibox-data:/data
+
+volumes:
+  magibox-data:

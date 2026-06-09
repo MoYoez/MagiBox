@@ -1,0 +1,9 @@
+# 运行时产物
+auth.json
+admins.json
+playground.json
+vars.json
+bundles.json
+bundle-media/
+.env
+*.exe
