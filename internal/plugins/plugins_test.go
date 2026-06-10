@@ -11,8 +11,9 @@ import (
 
 // Plugins should auto-register into the registry via init() at import time.
 func TestPluginsSelfRegister(t *testing.T) {
-	if n := len(plugin.All()); n != 6 {
-		t.Fatalf("已注册插件 = %d,期望 6(echo/ping/bind/perm/playground/bundle)", n)
+	// At least the 6 public plugins; gitignored local-only plugins may add more.
+	if n := len(plugin.All()); n < 6 {
+		t.Fatalf("已注册插件 = %d,期望 >= 6(echo/ping/bind/perm/playground/bundle)", n)
 	}
 }
 
