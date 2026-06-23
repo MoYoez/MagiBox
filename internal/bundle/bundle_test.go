@@ -22,9 +22,9 @@ func TestCollectFlow(t *testing.T) {
 	if err := Start(chat, "again"); err == nil {
 		t.Fatal("重复 start 应报错")
 	}
-	Add(chat, "Alice", "alice01", "你好")
-	Add(chat, "Bob", "", "在的")
-	Add(999, "Ghost", "", "不该被记录") // other chat is not collecting
+	Add(chat, "Alice", "alice01", "你好", 100, 1)
+	Add(chat, "Bob", "", "在的", 101, 2)
+	Add(999, "Ghost", "", "不该被记录", 100, 1) // other chat is not collecting
 
 	if c, n := Status(chat); !c || n != 2 {
 		t.Fatalf("status=%v,%d 期望 true,2", c, n)
@@ -45,6 +45,32 @@ func TestCollectFlow(t *testing.T) {
 	}
 }
 
+// TestOrdering simulates a batch of forwards arriving out of order (handlers
+// run in parallel goroutines) and verifies End sorts them by time then seq.
+func TestOrdering(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(filepath.Join(dir, "bundles.json"), filepath.Join(dir, "media"), "http://host"); err != nil {
+		t.Fatal(err)
+	}
+	const chat = int64(1)
+	_ = Start(chat, "T")
+	// Arrival order is scrambled; same-second messages disambiguate by seq.
+	Add(chat, "C", "", "third", 10, 3)
+	Add(chat, "A", "", "first", 10, 1)
+	Add(chat, "D", "", "fourth", 11, 4)
+	Add(chat, "B", "", "second", 10, 2)
+	b, err := End(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first", "second", "third", "fourth"}
+	for i, w := range want {
+		if b.Messages[i].Text != w {
+			t.Fatalf("位置 %d 为 %q, 期望 %q (顺序: %+v)", i, b.Messages[i].Text, w, b.Messages)
+		}
+	}
+}
+
 func TestServeContentNegotiation(t *testing.T) {
 	dir := t.TempDir()
 	if err := Init(filepath.Join(dir, "bundles.json"), filepath.Join(dir, "media"), "http://host"); err != nil {
@@ -52,7 +78,7 @@ func TestServeContentNegotiation(t *testing.T) {
 	}
 	const chat = int64(7)
 	_ = Start(chat, "T")
-	Add(chat, "A", "a", "<b>hi</b>") // verify HTML escaping works
+	Add(chat, "A", "a", "<b>hi</b>", 1, 1) // verify HTML escaping works
 	b, _ := End(chat)
 
 	srv := httptest.NewServer(Handler())
@@ -98,7 +124,7 @@ func TestMedia(t *testing.T) {
 	}
 	const chat = int64(5)
 	_ = Start(chat, "M")
-	AddMedia(chat, "A", "a", "photo", "图说", []byte{1, 2, 3}, "jpg")
+	AddMedia(chat, "A", "a", "photo", "图说", []byte{1, 2, 3}, "jpg", 1, 1)
 	b, _ := End(chat)
 
 	if len(b.Messages) != 1 || b.Messages[0].Kind != "photo" {

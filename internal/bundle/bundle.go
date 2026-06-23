@@ -30,6 +30,10 @@ type Message struct {
 	Text     string `json:"text,omitempty"`
 	Media    string `json:"media,omitempty"`
 	Time     int64  `json:"time"`
+	// seq is the source message id, used only to order messages
+	// deterministically (handlers run in parallel goroutines, so append
+	// order is racy — especially for a batch of forwards). Not serialized.
+	seq int64
 }
 
 // Bundle is a packaged snapshot of one conversation.
@@ -83,18 +87,20 @@ func Start(chatID int64, title string) error {
 }
 
 // Add appends a text message if the chat is currently collecting (otherwise
-// it is ignored).
-func Add(chatID int64, name, username, text string) {
+// it is ignored). when is the message's own timestamp and seq its source
+// message id; both are used to order the bundle deterministically (see
+// Message.seq).
+func Add(chatID int64, name, username, text string, when, seq int64) {
 	def.mu.Lock()
 	defer def.mu.Unlock()
 	if b, ok := def.collecting[chatID]; ok {
-		b.Messages = append(b.Messages, Message{Name: name, Username: username, Text: text, Time: time.Now().Unix()})
+		b.Messages = append(b.Messages, Message{Name: name, Username: username, Text: text, Time: when, seq: seq})
 	}
 }
 
 // AddMedia, if the chat is currently collecting, writes the downloaded media
-// to the media directory and appends a media message.
-func AddMedia(chatID int64, name, username, kind, caption string, data []byte, ext string) {
+// to the media directory and appends a media message. See Add for when/seq.
+func AddMedia(chatID int64, name, username, kind, caption string, data []byte, ext string, when, seq int64) {
 	def.mu.Lock()
 	defer def.mu.Unlock()
 	b, ok := def.collecting[chatID]
@@ -105,7 +111,7 @@ func AddMedia(chatID int64, name, username, kind, caption string, data []byte, e
 	if def.mediaDir != "" {
 		_ = os.WriteFile(filepath.Join(def.mediaDir, fname), data, 0o600)
 	}
-	b.Messages = append(b.Messages, Message{Name: name, Username: username, Kind: kind, Text: caption, Media: fname, Time: time.Now().Unix()})
+	b.Messages = append(b.Messages, Message{Name: name, Username: username, Kind: kind, Text: caption, Media: fname, Time: when, seq: seq})
 }
 
 // End stops collecting, generates an id, moves the bundle to the finished
@@ -121,6 +127,15 @@ func End(chatID int64) (*Bundle, error) {
 	if len(b.Messages) == 0 {
 		return nil, fmt.Errorf("没有收集到任何消息")
 	}
+	// Handlers run concurrently, so Messages is in arrival order, not chat
+	// order. Sort by timestamp, breaking ties by source message id (which is
+	// monotonic within a chat, including a batch of forwards).
+	sort.SliceStable(b.Messages, func(i, j int) bool {
+		if b.Messages[i].Time != b.Messages[j].Time {
+			return b.Messages[i].Time < b.Messages[j].Time
+		}
+		return b.Messages[i].seq < b.Messages[j].seq
+	})
 	b.ID = newID()
 	b.Ended = time.Now().Unix()
 	def.done[b.ID] = b

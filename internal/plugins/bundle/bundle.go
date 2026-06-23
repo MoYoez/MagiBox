@@ -37,7 +37,8 @@ func (Plugin) Commands() []plugin.Command {
 func (Plugin) Wire(b *tele.Bot) {
 	b.Handle(tele.OnText, func(c tele.Context) error {
 		name, username := senderOf(c)
-		bd.Add(c.Chat().ID, name, username, c.Text())
+		m := c.Message()
+		bd.Add(c.Chat().ID, name, username, c.Text(), m.Unixtime, int64(m.ID))
 		return nil
 	})
 	b.Handle(tele.OnPhoto, func(c tele.Context) error {
@@ -59,7 +60,8 @@ func (Plugin) Wire(b *tele.Bot) {
 		}
 		if v.FileSize > maxVideoBytes {
 			name, username := senderOf(c)
-			bd.Add(c.Chat().ID, name, username, "[视频过大,未打包]")
+			m := c.Message()
+			bd.Add(c.Chat().ID, name, username, "[视频过大,未打包]", m.Unixtime, int64(m.ID))
 			return nil
 		}
 		saveMedia(b, c, "video", &v.File, "mp4", c.Message().Caption)
@@ -84,7 +86,8 @@ func saveMedia(b *tele.Bot, c tele.Context, kind string, f *tele.File, ext, capt
 		return
 	}
 	name, username := senderOf(c)
-	bd.AddMedia(c.Chat().ID, name, username, kind, caption, data, ext)
+	m := c.Message()
+	bd.AddMedia(c.Chat().ID, name, username, kind, caption, data, ext, m.Unixtime, int64(m.ID))
 }
 
 func handle(c tele.Context) error {
@@ -134,11 +137,31 @@ func handle(c tele.Context) error {
 	}
 }
 
-// senderOf returns the sender's display name and optional username (without
-// @). The display name prefers first/last name, falling back to username,
-// then to user{id}.
+// senderOf returns the display name and optional username (without @) of the
+// message's author. For a forwarded message this is the ORIGINAL author — a
+// user, a hidden sender name, or the source channel/chat — not the person who
+// forwarded it. Otherwise it is the actual sender.
 func senderOf(c tele.Context) (name, username string) {
-	u := c.Sender()
+	if m := c.Message(); m != nil {
+		switch {
+		case m.OriginalSender != nil: // forwarded from a user with a visible account
+			return userName(m.OriginalSender)
+		case m.OriginalChat != nil: // forwarded from a channel/group
+			if t := strings.TrimSpace(m.OriginalChat.Title); t != "" {
+				return t, m.OriginalChat.Username
+			}
+			return m.OriginalChat.Username, m.OriginalChat.Username
+		case m.OriginalSenderName != "": // forwarded from a user who hides their account
+			return m.OriginalSenderName, ""
+		}
+	}
+	return userName(c.Sender())
+}
+
+// userName resolves a user's display name and optional username (without @).
+// The display name prefers first/last name, falling back to username, then to
+// user{id}.
+func userName(u *tele.User) (name, username string) {
 	if u == nil {
 		return "unknown", ""
 	}
