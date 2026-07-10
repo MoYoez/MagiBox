@@ -132,3 +132,7 @@ func KumaStorePath() string {
 	}
 	return "kuma.json"
 }
+
+// PanelCode returns the admin panel login code from PANEL_CODE. When empty the
+// panel is disabled (its routes are not mounted).
+func PanelCode() string { return os.Getenv("PANEL_CODE") }

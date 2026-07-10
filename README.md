@@ -58,6 +58,8 @@ docker run -d --name magibox \
 
 **Uptime Kuma 建监控(`/kuma`)** — 与 `/uptime`(接收 Kuma 回调)相反,这是主动调 Kuma 建监控。vanilla Kuma 没有建监控的 REST 接口,所以对接 [keithah/uptime-kuma-rest-api](https://github.com/keithah/uptime-kuma-rest-api) 这类包装器:`/kuma cred add <名> <base_url> [api_key]` 绑定包装器地址(API Key 仅在你给包装器加了鉴权时需要,以 Bearer 发送,不加就留空;显示打码)。`/kuma add <名> <域名>` 给指定域名建一个 `https://<域名>` 的 HTTP 监控;`/kuma add <名> all [大类]` 则把 `/cf` 记录库里的域名批量建监控(全局或按大类,自动跳过「被ban」)。`/kuma list <名>` 看现有监控,`/kuma del <名> <monitor_id>` 删。凭据存在 `kuma.json`(0600)。
 
+**后台面板(`panel`)** — 一个干净的网页后台,和 bundle 共用同一个 HTTP 服务,地址 `<PUBLIC_BASE_URL>/panel/`。设了 `PANEL_CODE` 才启用(没设就不挂载路由)。授权码登录:输入 `PANEL_CODE` 后签发一个 HMAC 签名、12 小时过期的 HttpOnly cookie(反代跑 https 时自动带 Secure)。面板覆盖前面几个功能:Cloudflare 域名记录(录入、改分类/状态/生命周期字段、绑定/解绑 Worker Custom Domain)、Uptime Kuma 监控(建/删/查)、以及只读查看 Worker、凭据、回调监听。凭据这类带密钥的创建仍留在 bot 里(`/cf cred`、`/kuma cred`),面板只做日常域名与监控操作。界面是密集型仪表盘风格,自适应桌面/移动,支持浅色/深色。
+
 **在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
 
 ## 配置
@@ -70,6 +72,7 @@ docker run -d --name magibox \
 | `BUNDLE_BASE_URL` | `http://localhost:8099` | 生成链接时的前缀 |
 | `BUNDLE_MEDIA_DIR` | `bundle-media` | 媒体文件目录 |
 | `PUBLIC_BASE_URL` | (空=同 `BUNDLE_BASE_URL`) | 插件 HTTP 路由(如 `/uptime` 回调)对外前缀,和 bundle 同一个服务;一般不用单独设 |
+| `PANEL_CODE` | (空=关闭面板) | 后台面板 `<PUBLIC_BASE_URL>/panel/` 的授权码;设了才启用,登录后签发签名 cookie |
 | `PLUGINS_MODE` / `PLUGINS_LIST` | `blacklist` / 空 | 插件开关:blacklist=列表里的禁用,whitelist=只启用列表里的;逗号分隔,如 `PLUGINS_LIST=echo,bundle` |
 | `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` / `UPTIME_STORE` / `CLOUDFLARE_STORE` | `*.json` | 各持久化文件路径 |
 
