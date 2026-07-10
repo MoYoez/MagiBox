@@ -156,8 +156,8 @@ function renderLogin(msg=''){
   $('#root').innerHTML='';
   const box=h(`<div class="login-wrap"><form class="login">
     <h1>${ICON.box} MagiBox 面板</h1>
-    <p>输入授权码登录</p>
-    <input id="code" type="password" placeholder="授权码" autocomplete="current-password" autofocus>
+    <p>输入管理员发放的一次性授权码</p>
+    <input id="code" type="password" placeholder="一次性授权码" autocomplete="off" autofocus>
     <div class="err">${esc(msg)}</div>
     <div class="row" style="margin-top:14px"><button class="btn" style="width:100%">登录</button></div>
   </form></div>`);

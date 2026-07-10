@@ -7,12 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
-// mountPanel builds the panel mux with PANEL_CODE set and serves it.
-func mountPanel(t *testing.T, code string) (*httptest.Server, *http.Client) {
+// mountPanel initializes the store and serves the panel mux.
+func mountPanel(t *testing.T) (*httptest.Server, *http.Client) {
 	t.Helper()
-	t.Setenv("PANEL_CODE", code)
+	initTestStore(t)
 	routes := Plugin{}.HTTPRoutes(nil)
 	if len(routes) != 1 {
 		t.Fatalf("want 1 route, got %d", len(routes))
@@ -23,15 +24,8 @@ func mountPanel(t *testing.T, code string) (*httptest.Server, *http.Client) {
 	return srv, &http.Client{Jar: jar}
 }
 
-func TestPanelDisabledWithoutCode(t *testing.T) {
-	t.Setenv("PANEL_CODE", "")
-	if routes := (Plugin{}).HTTPRoutes(nil); routes != nil {
-		t.Fatalf("panel should be disabled without PANEL_CODE, got %d routes", len(routes))
-	}
-}
-
-func TestPanelLoginFlow(t *testing.T) {
-	srv, client := mountPanel(t, "s3cr3t")
+func TestPanelOneTimeLoginFlow(t *testing.T) {
+	srv, client := mountPanel(t)
 
 	// The SPA shell is public.
 	res, err := client.Get(srv.URL + "/panel/")
@@ -48,22 +42,30 @@ func TestPanelLoginFlow(t *testing.T) {
 		t.Fatalf("unauthenticated state = %d, want 401", res.StatusCode)
 	}
 
-	// Wrong code is rejected.
-	res, _ = client.Post(srv.URL+"/panel/api/login", "application/json", strings.NewReader(`{"code":"nope"}`))
+	// A bogus code is rejected.
+	res, _ = client.Post(srv.URL+"/panel/api/login", "application/json", strings.NewReader(`{"code":"nope-nope-nope-nope"}`))
 	if res.StatusCode != 401 {
-		t.Fatalf("wrong code = %d, want 401", res.StatusCode)
+		t.Fatalf("bad code = %d, want 401", res.StatusCode)
 	}
 
-	// Correct code sets a session cookie.
-	res, _ = client.Post(srv.URL+"/panel/api/login", "application/json", strings.NewReader(`{"code":"s3cr3t"}`))
-	if res.StatusCode != 200 {
-		t.Fatalf("login = %d, want 200", res.StatusCode)
+	// Mint a one-time code (as an admin would via the bot) and log in with it.
+	code, err := NewCode(time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(res.Cookies()) == 0 {
-		t.Fatal("login did not set a cookie")
+	res, _ = client.Post(srv.URL+"/panel/api/login", "application/json", strings.NewReader(`{"code":"`+code+`"}`))
+	if res.StatusCode != 200 || len(res.Cookies()) == 0 {
+		t.Fatalf("login = %d, cookies=%d; want 200 with cookie", res.StatusCode, len(res.Cookies()))
 	}
 
-	// Now state works and carries the expected top-level keys.
+	// The same code cannot be reused (single-use) — from a fresh client.
+	jar2, _ := cookiejar.New(nil)
+	res, _ = (&http.Client{Jar: jar2}).Post(srv.URL+"/panel/api/login", "application/json", strings.NewReader(`{"code":"`+code+`"}`))
+	if res.StatusCode != 401 {
+		t.Fatalf("reused code = %d, want 401", res.StatusCode)
+	}
+
+	// The logged-in client can now read state.
 	res, _ = client.Get(srv.URL + "/panel/api/state")
 	if res.StatusCode != 200 {
 		t.Fatalf("authed state = %d, want 200", res.StatusCode)

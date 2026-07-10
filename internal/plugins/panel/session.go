@@ -13,30 +13,23 @@ import (
 
 const (
 	cookieName = "mb_panel"
-	sessionTTL = 12 * time.Hour
+	sessionTTL = 30 * 24 * time.Hour // one month
 )
 
-// signingKey derives the HMAC key from the panel code, so rotating PANEL_CODE
-// invalidates existing sessions.
-func signingKey(code string) []byte {
-	sum := sha256.Sum256([]byte("magibox-panel:" + code))
-	return sum[:]
-}
-
 // issueSession returns a signed "<expUnix>.<hmac>" token valid for sessionTTL.
-func issueSession(code string, now time.Time) string {
+func issueSession(now time.Time) string {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(now.Add(sessionTTL).Unix(), 10)))
-	return payload + "." + sign(code, payload)
+	return payload + "." + sign(payload)
 }
 
-// validSession reports whether token is well-formed, correctly signed for the
-// current code, and unexpired.
-func validSession(code, token string, now time.Time) bool {
+// validSession reports whether token is well-formed, correctly signed with the
+// current secret, and unexpired.
+func validSession(token string, now time.Time) bool {
 	payload, sig, ok := strings.Cut(token, ".")
 	if !ok {
 		return false
 	}
-	if !hmac.Equal([]byte(sig), []byte(sign(code, payload))) {
+	if !hmac.Equal([]byte(sig), []byte(sign(payload))) {
 		return false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
@@ -50,8 +43,8 @@ func validSession(code, token string, now time.Time) bool {
 	return now.Unix() < exp
 }
 
-func sign(code, payload string) string {
-	mac := hmac.New(sha256.New, signingKey(code))
+func sign(payload string) string {
+	mac := hmac.New(sha256.New, secret())
 	mac.Write([]byte(payload))
 	return hex.EncodeToString(mac.Sum(nil))
 }
@@ -74,11 +67,11 @@ func isTLS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// authed reports whether the request carries a valid session for code.
-func authed(r *http.Request, code string) bool {
+// authed reports whether the request carries a valid session.
+func authed(r *http.Request) bool {
 	ck, err := r.Cookie(cookieName)
 	if err != nil {
 		return false
 	}
-	return validSession(code, ck.Value, time.Now())
+	return validSession(ck.Value, time.Now())
 }
