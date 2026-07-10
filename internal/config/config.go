@@ -132,3 +132,12 @@ func KumaStorePath() string {
 	}
 	return "kuma.json"
 }
+
+// PanelStorePath returns the persistence file path for the admin panel's
+// signing secret and pending one-time login codes (default panel.json).
+func PanelStorePath() string {
+	if p := os.Getenv("PANEL_STORE"); p != "" {
+		return p
+	}
+	return "panel.json"
+}
