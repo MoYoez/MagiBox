@@ -6,6 +6,7 @@ package plugins
 import (
 	_ "github.com/moyoez/magibox/internal/plugins/bind"
 	_ "github.com/moyoez/magibox/internal/plugins/bundle"
+	_ "github.com/moyoez/magibox/internal/plugins/cf"
 	_ "github.com/moyoez/magibox/internal/plugins/echo"
 	_ "github.com/moyoez/magibox/internal/plugins/perm"
 	_ "github.com/moyoez/magibox/internal/plugins/ping"

@@ -114,3 +114,12 @@ func UptimeStorePath() string {
 	}
 	return "uptime.json"
 }
+
+// CloudflareStorePath returns the persistence file path for Cloudflare creds /
+// workers / domain records (default cloudflare.json).
+func CloudflareStorePath() string {
+	if p := os.Getenv("CLOUDFLARE_STORE"); p != "" {
+		return p
+	}
+	return "cloudflare.json"
+}
