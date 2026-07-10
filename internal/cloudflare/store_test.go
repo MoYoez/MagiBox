@@ -7,12 +7,19 @@ import (
 
 func freshStore(t *testing.T) {
 	t.Helper()
+	freshStoreAt(t, t.TempDir())
+}
+
+// freshStoreAt resets the global store and (re)loads it from dir's
+// cloudflare.json, so a second call with the same dir reloads persisted state.
+func freshStoreAt(t *testing.T, dir string) {
+	t.Helper()
 	def = &store{
 		creds:   map[string]*Cred{},
 		workers: map[string]*Worker{},
 		domains: map[string]*Domain{},
 	}
-	if err := Init(filepath.Join(t.TempDir(), "cloudflare.json")); err != nil {
+	if err := Init(filepath.Join(dir, "cloudflare.json")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -68,6 +75,34 @@ func TestCredWorkerDomainLifecycle(t *testing.T) {
 	used := ListDomains("projA", StatusUsed)
 	if len(used) != 1 || used[0].Name != "a.example.com" {
 		t.Fatalf("ListDomains used = %+v", used)
+	}
+}
+
+func TestDomainLifecycleFieldsPersist(t *testing.T) {
+	dir := t.TempDir()
+	freshStoreAt(t, dir)
+	if err := AddDomain("projA", "life.example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := MutateDomain("life.example.com", func(d *Domain) error {
+		d.PurchasedAt = "2024-01-15"
+		d.Usage = "落地页"
+		d.DNS = "CNAME → edge.example.net"
+		d.Ready = true
+		d.ChangedAt = "2024-02-01 12:00"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Reload from disk into a fresh store and confirm the fields survived.
+	freshStoreAt(t, dir)
+	d, ok := GetDomain("life.example.com")
+	if !ok {
+		t.Fatal("domain missing after reload")
+	}
+	if d.PurchasedAt != "2024-01-15" || d.Usage != "落地页" ||
+		d.DNS != "CNAME → edge.example.net" || !d.Ready || d.ChangedAt != "2024-02-01 12:00" {
+		t.Fatalf("lifecycle fields not persisted: %+v", d)
 	}
 }
 

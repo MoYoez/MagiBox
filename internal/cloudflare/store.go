@@ -45,14 +45,21 @@ type Worker struct {
 }
 
 // Domain is one record-book entry: a hostname under a major category (大类),
-// an optional minor category (小类), a status, and the worker it is currently
-// attached to (when used).
+// an optional minor category (小类), a status, the worker it is currently
+// attached to (when used), plus lifecycle metadata (purchase date, intended
+// use, DNS, readiness, last-changed time).
 type Domain struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`      // 大类
 	Sub      string `json:"sub,omitempty"` // 小类
 	Status   string `json:"status"`
 	Worker   string `json:"worker,omitempty"`
+
+	PurchasedAt string `json:"purchased_at,omitempty"` // 购买日期(自由格式,如 2024-01-15)
+	Usage       string `json:"usage,omitempty"`        // 准备用在哪里
+	DNS         string `json:"dns,omitempty"`          // dns 是什么
+	Ready       bool   `json:"ready,omitempty"`        // 是否准备就绪
+	ChangedAt   string `json:"changed_at,omitempty"`   // 什么时间更换的(绑定时自动记,也可手改)
 }
 
 var (

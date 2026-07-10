@@ -23,10 +23,12 @@ Worker(绑定凭据 + 大类):
   /cf worker add <worker> <凭据> [大类]
   /cf worker cat <worker> <大类>          改绑大类
   /cf worker list | del <worker>
-记录库(大类 / 小类 / 状态):
+记录库(大类 / 小类 / 状态 + 生命周期字段):
   /cf domain add <大类> <域名[,域名...]> [小类]
   /cf domain list [大类] [状态]
   /cf domain status <域名> <未使用|已使用|ban>
+  /cf domain set <域名> <字段> <值>
+      字段:purchased 购买日期 | usage 用途 | dns DNS | ready 就绪(yes/no) | changed 更换时间
   /cf domain del <域名>
 绑定(Custom Domains,自动挑域名 + 自动改状态):
   /cf bind <worker> [域名] [force]
@@ -232,6 +234,9 @@ func handleDomain(c tele.Context, args []string) error {
 			if d.Sub != "" {
 				line += " /" + d.Sub
 			}
+			if d.Ready {
+				line += " ✅就绪"
+			}
 			if d.Worker != "" {
 				line += " → " + d.Worker
 			}
@@ -256,6 +261,8 @@ func handleDomain(c tele.Context, args []string) error {
 			return c.Send("失败:" + err.Error())
 		}
 		return c.Send("✅ " + args[2] + " 状态已设为 " + statusText(s))
+	case "set":
+		return handleDomainSet(c, args)
 	case "del":
 		if len(args) < 3 {
 			return c.Send("用法:/cf domain del <域名>")
@@ -265,8 +272,53 @@ func handleDomain(c tele.Context, args []string) error {
 		}
 		return c.Send("🗑 已删除域名记录 " + args[2])
 	default:
-		return c.Send("未知操作 " + args[1] + "(add|list|status|del)")
+		return c.Send("未知操作 " + args[1] + "(add|list|status|set|del)")
 	}
+}
+
+// handleDomainSet sets one lifecycle field on a domain record. Value is the
+// rest of the args joined, so free-text fields may contain spaces.
+func handleDomainSet(c tele.Context, args []string) error {
+	if len(args) < 5 {
+		return c.Send("用法:/cf domain set <域名> <字段> <值>\n字段:purchased|usage|dns|ready|changed")
+	}
+	domain, field := args[2], strings.ToLower(args[3])
+	value := strings.Join(args[4:], " ")
+	err := cf.MutateDomain(domain, func(d *cf.Domain) error {
+		switch field {
+		case "purchased", "购买", "购买日期":
+			d.PurchasedAt = value
+		case "usage", "用途", "用在哪":
+			d.Usage = value
+		case "dns", "解析":
+			d.DNS = value
+		case "changed", "更换", "更换时间":
+			d.ChangedAt = value
+		case "ready", "就绪":
+			b, ok := parseBool(value)
+			if !ok {
+				return fmt.Errorf("ready 需为 yes/no(或 true/false、1/0)")
+			}
+			d.Ready = b
+		default:
+			return fmt.Errorf("未知字段 %q(purchased|usage|dns|ready|changed)", field)
+		}
+		return nil
+	})
+	if err != nil {
+		return c.Send("失败:" + err.Error())
+	}
+	return c.Send(fmt.Sprintf("✅ %s 的 %s 已更新", domain, field))
+}
+
+func parseBool(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "y", "true", "1", "就绪", "是", "ok":
+		return true, true
+	case "no", "n", "false", "0", "未就绪", "否":
+		return false, true
+	}
+	return false, false
 }
 
 // --- bind / unbind (Cloudflare Custom Domains) ---
@@ -342,6 +394,7 @@ func handleBind(c tele.Context, args []string) error {
 	_ = cf.MutateDomain(domain, func(d *cf.Domain) error {
 		d.Status = cf.StatusUsed
 		d.Worker = w.Name
+		d.ChangedAt = time.Now().Format("2006-01-02 15:04")
 		return nil
 	})
 
@@ -427,12 +480,24 @@ func handleShow(c tele.Context, args []string) error {
 	}
 	if d, ok := cf.GetDomain(name); ok {
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "域名:%s\n大类:%s\n状态:%s\n", d.Name, d.Category, statusText(d.Status))
+		fmt.Fprintf(&sb, "域名:%s\n大类:%s\n状态:%s\n就绪:%s\n", d.Name, d.Category, statusText(d.Status), readyText(d.Ready))
 		if d.Sub != "" {
 			fmt.Fprintf(&sb, "小类:%s\n", d.Sub)
 		}
 		if d.Worker != "" {
 			fmt.Fprintf(&sb, "绑定 worker:%s\n", d.Worker)
+		}
+		if d.PurchasedAt != "" {
+			fmt.Fprintf(&sb, "购买日期:%s\n", d.PurchasedAt)
+		}
+		if d.Usage != "" {
+			fmt.Fprintf(&sb, "用途:%s\n", d.Usage)
+		}
+		if d.DNS != "" {
+			fmt.Fprintf(&sb, "DNS:%s\n", d.DNS)
+		}
+		if d.ChangedAt != "" {
+			fmt.Fprintf(&sb, "更换时间:%s\n", d.ChangedAt)
 		}
 		return c.Send(strings.TrimSpace(sb.String()))
 	}
@@ -440,6 +505,13 @@ func handleShow(c tele.Context, args []string) error {
 }
 
 // --- helpers ---
+
+func readyText(ready bool) string {
+	if ready {
+		return "✅ 就绪"
+	}
+	return "⬜ 未就绪"
+}
 
 func statusText(s string) string {
 	switch s {
