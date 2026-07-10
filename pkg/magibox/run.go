@@ -2,8 +2,11 @@
 package magibox
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -50,10 +53,16 @@ func Run() error {
 		return fmt.Errorf("初始化 bundle: %w", err)
 	}
 
+	addr := config.BundleAddr()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("启动 bundle HTTP 服务 %s: %w", addr, err)
+	}
+	defer listener.Close()
+
+	log.Printf("bundle HTTP 服务监听 %s(base=%s)", addr, config.BundleBaseURL())
 	go func() {
-		addr := config.BundleAddr()
-		log.Printf("bundle HTTP 服务监听 %s(base=%s)", addr, config.BundleBaseURL())
-		if err := bundle.Serve(addr); err != nil {
+		if err := http.Serve(listener, bundle.Handler()); err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("[bundle] HTTP 服务退出: %v", err)
 		}
 	}()
