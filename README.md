@@ -67,4 +67,38 @@ docker run -d --name magibox \
 
 ## 写一个插件
 
-在 `internal/plugins/` 下新建一个包,实现 `Name()` 和需要的扩展点(`Commands()` 命令、`Jobs()` 定时任务、`Wire()` 消息流),在 `init()` 里调用 `plugin.Register`,最后在 `internal/plugins/all.go` 里加一行空导入。主程序和其他插件不用动。
+仓库内插件放在 `internal/plugins/`，实现 `plugin.Plugin` 并在 `init()` 中注册：
+
+```go
+package hello
+
+import "github.com/moyoez/magibox/pkg/plugin"
+
+type Plugin struct{ plugin.Base }
+
+func (Plugin) Name() string { return "hello" }
+
+func init() { plugin.Register(Plugin{}) }
+```
+
+仓库外插件使用独立 Go Module，导入 `pkg/plugin`；需要管理员权限时使用
+`pkg/auth.RequireAdmin()`。独立宿主先空导入自己的插件集合，再调用共享启动入口：
+
+```go
+package main
+
+import (
+    "log"
+
+    "github.com/moyoez/magibox/pkg/magibox"
+    _ "example.com/my-host/plugins"
+)
+
+func main() {
+    if err := magibox.Run(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+依赖方向始终是外部宿主依赖 MagiBox；MagiBox 本身不依赖外部插件仓库。

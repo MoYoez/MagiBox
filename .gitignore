@@ -7,9 +7,6 @@ bundles.json
 report.json
 bundle-media/
 
-# 本地私有插件(不进仓库)
-internal/plugins/report/
-internal/plugins/local.go
 .env
 *.exe
 .worktrees/
