@@ -1,6 +1,7 @@
 package magibox
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +36,7 @@ func TestRunReturnsBundleListenError(t *testing.T) {
 	}
 	defer occupied.Close()
 
-	const pluginName = "host-listen-error-test"
+	pluginName := uniquePluginName("host-listen-error-test")
 	plugin.Register(setupFailurePlugin{name: pluginName})
 	configureRun(t, occupied.Addr().String(), pluginName)
 
@@ -60,7 +62,7 @@ func TestRunClosesBundleListenerWhenSetupFails(t *testing.T) {
 	}
 
 	listeningObserved := false
-	const pluginName = "host-listener-cleanup-test"
+	pluginName := uniquePluginName("host-listener-cleanup-test")
 	plugin.Register(setupFailurePlugin{
 		name: pluginName,
 		beforeJobs: func() {
@@ -82,6 +84,12 @@ func TestRunClosesBundleListenerWhenSetupFails(t *testing.T) {
 		t.Fatalf("bundle listener remained open after Run returned: %v", err)
 	}
 	rebound.Close()
+}
+
+var pluginNameSequence atomic.Uint64
+
+func uniquePluginName(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, pluginNameSequence.Add(1))
 }
 
 type setupFailurePlugin struct {
