@@ -16,8 +16,10 @@ import (
 	"github.com/moyoez/magibox/internal/bundle"
 	cloudflare "github.com/moyoez/magibox/internal/cloudflare"
 	"github.com/moyoez/magibox/internal/config"
+	"github.com/moyoez/magibox/internal/kuma"
 	"github.com/moyoez/magibox/internal/playground"
 	_ "github.com/moyoez/magibox/internal/plugins"
+	"github.com/moyoez/magibox/internal/plugins/panel"
 	"github.com/moyoez/magibox/internal/uptime"
 	"github.com/moyoez/magibox/pkg/plugin"
 )
@@ -59,6 +61,12 @@ func Run() error {
 	}
 	if err := cloudflare.Init(config.CloudflareStorePath()); err != nil {
 		return fmt.Errorf("初始化 cloudflare: %w", err)
+	}
+	if err := panel.Init(config.PanelStorePath()); err != nil {
+		return fmt.Errorf("初始化 panel: %w", err)
+	}
+	if err := kuma.Init(config.KumaStorePath()); err != nil {
+		return fmt.Errorf("初始化 kuma: %w", err)
 	}
 
 	// Filter is applied before building HTTP routes so plugin.HTTPRoutes

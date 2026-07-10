@@ -4,6 +4,7 @@ package cf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -248,19 +249,10 @@ func handleDomain(c tele.Context, args []string) error {
 		if len(args) < 4 {
 			return c.Send("用法:/cf domain status <域名> <未使用|已使用|ban>")
 		}
-		s, ok := cf.NormalizeStatus(args[3])
-		if !ok {
-			return c.Send("状态只能是 未使用|已使用|ban")
-		}
-		if err := cf.MutateDomain(args[2], func(d *cf.Domain) error {
-			d.Status = s
-			if s == cf.StatusUnused {
-				d.Worker = ""
-			}
-			return nil
-		}); err != nil {
+		if err := cf.SetDomainField(args[2], "status", args[3]); err != nil {
 			return c.Send("失败:" + err.Error())
 		}
+		s, _ := cf.NormalizeStatus(args[3])
 		return c.Send("✅ " + args[2] + " 状态已设为 " + statusText(s))
 	case "set":
 		return handleDomainSet(c, args)
@@ -285,48 +277,10 @@ func handleDomainSet(c tele.Context, args []string) error {
 	}
 	domain, field := args[2], strings.ToLower(args[3])
 	value := strings.Join(args[4:], " ")
-	err := cf.MutateDomain(domain, func(d *cf.Domain) error {
-		switch field {
-		case "category", "大类":
-			if !cf.NameValid(value) {
-				return fmt.Errorf("大类名只能是 a-zA-Z0-9_.-")
-			}
-			d.Category = value
-		case "sub", "小类":
-			d.Sub = value
-		case "purchased", "购买", "购买日期":
-			d.PurchasedAt = value
-		case "usage", "用途", "用在哪":
-			d.Usage = value
-		case "dns", "解析":
-			d.DNS = value
-		case "changed", "更换", "更换时间":
-			d.ChangedAt = value
-		case "ready", "就绪":
-			b, ok := parseBool(value)
-			if !ok {
-				return fmt.Errorf("ready 需为 yes/no(或 true/false、1/0)")
-			}
-			d.Ready = b
-		default:
-			return fmt.Errorf("未知字段 %q(category|sub|purchased|usage|dns|ready|changed)", field)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := cf.SetDomainField(domain, field, value); err != nil {
 		return c.Send("失败:" + err.Error())
 	}
 	return c.Send(fmt.Sprintf("✅ %s 的 %s 已更新", domain, field))
-}
-
-func parseBool(s string) (bool, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "yes", "y", "true", "1", "就绪", "是", "ok":
-		return true, true
-	case "no", "n", "false", "0", "未就绪", "否":
-		return false, true
-	}
-	return false, false
 }
 
 // --- bind / unbind (Cloudflare Custom Domains) ---
@@ -336,10 +290,6 @@ func handleBind(c tele.Context, args []string) error {
 		return c.Send("用法:/cf bind <worker> [域名] [force]")
 	}
 	workerName := args[1]
-	w, ok := cf.GetWorker(workerName)
-	if !ok {
-		return c.Send("没有这个 worker:" + workerName)
-	}
 	// Parse optional [域名] and the force flag (order-independent for the flag).
 	domain, force := "", false
 	for _, a := range args[2:] {
@@ -350,65 +300,20 @@ func handleBind(c tele.Context, args []string) error {
 		}
 	}
 
-	// No explicit domain: auto-pick the next unused domain from the worker's category.
-	autoPicked := false
-	if domain == "" {
-		if w.Category == "" {
-			return c.Send("该 worker 未绑定大类,请显式给域名:/cf bind " + workerName + " <域名>")
-		}
-		d, ok := cf.NextUnused(w.Category)
-		if !ok {
-			return c.Send("大类 " + w.Category + " 里没有「未使用」的域名了")
-		}
-		domain, autoPicked = d.Name, true
-	}
-	if !cf.HostValid(domain) {
-		return c.Send("域名格式不对:" + domain)
-	}
-
-	cred, ok := cf.GetCred(w.Cred)
-	if !ok {
-		return c.Send("worker 绑定的凭据 " + w.Cred + " 不存在了,请重新 /cf worker add")
-	}
-	client := cf.NewClient(cred)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-
-	// Conflict check: is this hostname already attached to a different worker?
-	existing, err := client.ListWorkerDomainsByHostname(ctx, domain)
+	res, err := cf.BindDomain(ctx, workerName, domain, force)
 	if err != nil {
-		return c.Send("查询现有绑定失败:" + err.Error())
-	}
-	for _, e := range existing {
-		if e.Service != w.Name && !force {
+		var conf *cf.ConflictError
+		if errors.As(err, &conf) {
 			return c.Send(fmt.Sprintf("⚠️ %s 已绑定到 worker「%s」。确认替换请加 force:\n/cf bind %s %s force",
-				domain, e.Service, workerName, domain))
+				conf.Domain, conf.CurrentWorker, workerName, conf.Domain))
 		}
+		return c.Send("失败:" + err.Error())
 	}
-
-	zoneID, zoneName, err := client.ResolveZoneID(ctx, domain)
-	if err != nil {
-		return c.Send("解析 zone 失败:" + err.Error())
-	}
-	if _, err := client.AttachWorkerDomain(ctx, domain, w.Name, zoneID, w.Env); err != nil {
-		return c.Send("绑定失败:" + err.Error())
-	}
-
-	// Bookkeeping: mark the domain used and record its worker (create the
-	// record if the operator bound a domain that wasn't tracked yet).
-	if _, ok := cf.GetDomain(domain); !ok {
-		_ = cf.AddDomain(firstNonEmpty(w.Category, "default"), domain, "")
-	}
-	_ = cf.MutateDomain(domain, func(d *cf.Domain) error {
-		d.Status = cf.StatusUsed
-		d.Worker = w.Name
-		d.ChangedAt = time.Now().Format("2006-01-02 15:04")
-		return nil
-	})
-
-	msg := fmt.Sprintf("✅ 已把 %s 绑定到 worker「%s」(zone %s),并标记为「已使用」", domain, w.Name, zoneName)
-	if autoPicked {
-		msg = "🎯 自动选用大类 " + w.Category + " 的域名\n" + msg
+	msg := fmt.Sprintf("✅ 已把 %s 绑定到 worker「%s」(zone %s),并标记为「已使用」", res.Domain, res.Worker, res.ZoneName)
+	if res.AutoPicked {
+		msg = "🎯 自动选用域名 " + res.Domain + "\n" + msg
 	}
 	return c.Send(msg)
 }
@@ -417,44 +322,12 @@ func handleUnbind(c tele.Context, args []string) error {
 	if len(args) < 2 {
 		return c.Send("用法:/cf unbind <域名>")
 	}
-	domain := args[1]
-	d, ok := cf.GetDomain(domain)
-	if !ok {
-		return c.Send("没有这个域名记录:" + domain + "(unbind 需要记录里知道它属于哪个 worker)")
-	}
-	if d.Worker == "" {
-		return c.Send(domain + " 记录里没有绑定的 worker,无从解绑")
-	}
-	w, ok := cf.GetWorker(d.Worker)
-	if !ok {
-		return c.Send("记录指向的 worker " + d.Worker + " 已不存在")
-	}
-	cred, ok := cf.GetCred(w.Cred)
-	if !ok {
-		return c.Send("worker 的凭据 " + w.Cred + " 已不存在")
-	}
-	client := cf.NewClient(cred)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-
-	existing, err := client.ListWorkerDomainsByHostname(ctx, domain)
-	if err != nil {
-		return c.Send("查询绑定失败:" + err.Error())
+	if err := cf.UnbindDomain(ctx, args[1]); err != nil {
+		return c.Send("失败:" + err.Error())
 	}
-	if len(existing) == 0 {
-		return c.Send("Cloudflare 上没有找到 " + domain + " 的 Custom Domain 绑定(可能已解绑)")
-	}
-	for _, e := range existing {
-		if err := client.DeleteWorkerDomain(ctx, e.ID); err != nil {
-			return c.Send("解绑失败:" + err.Error())
-		}
-	}
-	_ = cf.MutateDomain(domain, func(d *cf.Domain) error {
-		d.Status = cf.StatusUnused
-		d.Worker = ""
-		return nil
-	})
-	return c.Send("✅ 已解绑 " + domain + ",状态回到「未使用」")
+	return c.Send("✅ 已解绑 " + args[1] + ",状态回到「未使用」")
 }
 
 func handleShow(c tele.Context, args []string) error {
@@ -540,15 +413,6 @@ func mask(v string) string {
 		return "***"
 	}
 	return string(r[:4]) + "***" + string(r[len(r)-4:])
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func init() { plugin.Register(Plugin{}) }
