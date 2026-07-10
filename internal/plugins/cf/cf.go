@@ -28,7 +28,8 @@ Worker(绑定凭据 + 大类):
   /cf domain list [大类] [状态]
   /cf domain status <域名> <未使用|已使用|ban>
   /cf domain set <域名> <字段> <值>
-      字段:purchased 购买日期 | usage 用途 | dns DNS | ready 就绪(yes/no) | changed 更换时间
+      分类:category 大类 | sub 小类
+      生命周期:purchased 购买日期 | usage 用途 | dns DNS | ready 就绪(yes/no) | changed 更换时间
   /cf domain del <域名>
 绑定(Custom Domains,自动挑域名 + 自动改状态):
   /cf bind <worker> [域名] [force]
@@ -280,12 +281,19 @@ func handleDomain(c tele.Context, args []string) error {
 // rest of the args joined, so free-text fields may contain spaces.
 func handleDomainSet(c tele.Context, args []string) error {
 	if len(args) < 5 {
-		return c.Send("用法:/cf domain set <域名> <字段> <值>\n字段:purchased|usage|dns|ready|changed")
+		return c.Send("用法:/cf domain set <域名> <字段> <值>\n字段:category|sub|purchased|usage|dns|ready|changed")
 	}
 	domain, field := args[2], strings.ToLower(args[3])
 	value := strings.Join(args[4:], " ")
 	err := cf.MutateDomain(domain, func(d *cf.Domain) error {
 		switch field {
+		case "category", "大类":
+			if !cf.NameValid(value) {
+				return fmt.Errorf("大类名只能是 a-zA-Z0-9_.-")
+			}
+			d.Category = value
+		case "sub", "小类":
+			d.Sub = value
 		case "purchased", "购买", "购买日期":
 			d.PurchasedAt = value
 		case "usage", "用途", "用在哪":
@@ -301,7 +309,7 @@ func handleDomainSet(c tele.Context, args []string) error {
 			}
 			d.Ready = b
 		default:
-			return fmt.Errorf("未知字段 %q(purchased|usage|dns|ready|changed)", field)
+			return fmt.Errorf("未知字段 %q(category|sub|purchased|usage|dns|ready|changed)", field)
 		}
 		return nil
 	})

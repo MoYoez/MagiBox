@@ -106,6 +106,27 @@ func TestDomainLifecycleFieldsPersist(t *testing.T) {
 	}
 }
 
+func TestDomainReclassify(t *testing.T) {
+	freshStore(t)
+	if err := AddDomain("projA", "move.example.com", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := MutateDomain("move.example.com", func(d *Domain) error {
+		d.Category = "projB"
+		d.Sub = "edge"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ListDomains("projA", ""); len(got) != 0 {
+		t.Fatalf("projA should be empty after move, got %+v", got)
+	}
+	inB := ListDomains("projB", "")
+	if len(inB) != 1 || inB[0].Name != "move.example.com" || inB[0].Sub != "edge" {
+		t.Fatalf("projB = %+v; want the moved domain with sub=edge", inB)
+	}
+}
+
 func TestNormalizeStatus(t *testing.T) {
 	cases := map[string]string{
 		"未使用": StatusUnused, "unused": StatusUnused,
