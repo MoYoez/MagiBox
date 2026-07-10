@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/robfig/cron/v3"
@@ -20,6 +21,37 @@ type Scheduler interface {
 // to register non-command handlers (e.g. the tele.OnText message stream).
 type Wirer interface {
 	Wire(b *tele.Bot)
+}
+
+// Route mounts an HTTP handler at a net/http ServeMux pattern on the shared
+// server (the same one that serves bundle). A trailing slash makes it a
+// subtree match, e.g. Pattern "/hook/uptime/" catches "/hook/uptime/<token>".
+type Route struct {
+	Pattern string
+	Handler http.Handler
+}
+
+// HTTPer is an optional plugin extension: it contributes HTTP routes to the
+// shared server. The bot is passed in so handlers (e.g. inbound webhooks)
+// can push messages proactively.
+type HTTPer interface {
+	HTTPRoutes(b *tele.Bot) []Route
+}
+
+// HTTPRoutes collects the routes contributed by every enabled HTTPer plugin.
+// The host mounts these on the shared HTTP server; call it after SetFilter so
+// disabled plugins are honored.
+func HTTPRoutes(b *tele.Bot) []Route {
+	var routes []Route
+	for _, p := range All() {
+		if !Enabled(p.Name()) {
+			continue
+		}
+		if h, ok := p.(HTTPer); ok {
+			routes = append(routes, h.HTTPRoutes(b)...)
+		}
+	}
+	return routes
 }
 
 // Setup wires all registered plugins onto the bot and cron:

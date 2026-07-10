@@ -17,6 +17,7 @@ import (
 	"github.com/moyoez/magibox/internal/config"
 	"github.com/moyoez/magibox/internal/playground"
 	_ "github.com/moyoez/magibox/internal/plugins"
+	"github.com/moyoez/magibox/internal/uptime"
 	"github.com/moyoez/magibox/pkg/plugin"
 )
 
@@ -52,23 +53,40 @@ func Run() error {
 	if err := bundle.Init(config.BundleStorePath(), config.BundleMediaDir(), config.BundleBaseURL()); err != nil {
 		return fmt.Errorf("初始化 bundle: %w", err)
 	}
+	if err := uptime.Init(config.UptimeStorePath()); err != nil {
+		return fmt.Errorf("初始化 uptime: %w", err)
+	}
 
+	// Filter is applied before building HTTP routes so plugin.HTTPRoutes
+	// honors disabled plugins.
+	plugin.SetFilter(config.PluginsMode(), config.PluginsList())
+
+	// Shared HTTP server: plugin routes (e.g. inbound webhooks) mount first,
+	// then bundle handles everything else (/b/, /m/). The listener is opened
+	// and serving before plugin.Setup so a port conflict surfaces first and the
+	// listener is torn down if Setup fails (see run_test.go).
 	addr := config.BundleAddr()
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("启动 bundle HTTP 服务 %s: %w", addr, err)
+		return fmt.Errorf("启动 HTTP 服务 %s: %w", addr, err)
 	}
 	defer listener.Close()
 
-	log.Printf("bundle HTTP 服务监听 %s(base=%s)", addr, config.BundleBaseURL())
+	mux := http.NewServeMux()
+	for _, rt := range plugin.HTTPRoutes(b) {
+		mux.Handle(rt.Pattern, rt.Handler)
+		log.Printf("[http] 挂载路由 %s", rt.Pattern)
+	}
+	mux.Handle("/", bundle.Handler())
+
+	log.Printf("HTTP 服务监听 %s(base=%s)", addr, config.BundleBaseURL())
 	go func() {
-		if err := http.Serve(listener, bundle.Handler()); err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Printf("[bundle] HTTP 服务退出: %v", err)
+		if err := http.Serve(listener, mux); err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Printf("[http] 服务退出: %v", err)
 		}
 	}()
 
 	c := cron.New()
-	plugin.SetFilter(config.PluginsMode(), config.PluginsList())
 	if err := plugin.Setup(b, c); err != nil {
 		return fmt.Errorf("设置插件: %w", err)
 	}

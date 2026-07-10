@@ -95,3 +95,22 @@ func BundleMediaDir() string {
 	}
 	return "bundle-media"
 }
+
+// PublicBaseURL returns the public URL prefix for plugin HTTP routes served on
+// the shared server (e.g. inbound webhooks). It falls back to BUNDLE_BASE_URL
+// since those routes live on the same server; set PUBLIC_BASE_URL only to
+// override that (default same as BundleBaseURL).
+func PublicBaseURL() string {
+	if u := os.Getenv("PUBLIC_BASE_URL"); u != "" {
+		return u
+	}
+	return BundleBaseURL()
+}
+
+// UptimeStorePath returns the persistence file path for uptime watchers (default uptime.json).
+func UptimeStorePath() string {
+	if p := os.Getenv("UPTIME_STORE"); p != "" {
+		return p
+	}
+	return "uptime.json"
+}
