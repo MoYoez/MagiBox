@@ -5,6 +5,10 @@ playground.json
 vars.json
 bundles.json
 report.json
+uptime.json
+cloudflare.json
+kuma.json
+panel.json
 bundle-media/
 
 .env
