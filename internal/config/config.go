@@ -123,3 +123,12 @@ func CloudflareStorePath() string {
 	}
 	return "cloudflare.json"
 }
+
+// KumaStorePath returns the persistence file path for Uptime Kuma wrapper
+// credentials (default kuma.json).
+func KumaStorePath() string {
+	if p := os.Getenv("KUMA_STORE"); p != "" {
+		return p
+	}
+	return "kuma.json"
+}
