@@ -41,6 +41,7 @@ docker run -d --name magibox \
 | `/pg_run` `/pg_sched` `/pg_new` … | `/pg` 子命令的独立版本,参数相同,输 `/` 有补全 | admin |
 | `/<组名> [键=值 …]` | playground 分组直达命令,等价 `/pg run <组名>`;新建分组自动注册,删除自动移除(组名需为 a-z0-9_) | admin |
 | `/bundle start/end/status/cancel` | 会话打包 | 公开 |
+| `/uptime` | Uptime Kuma 回调监听:生成回调地址、把回调 JSON 解析成文案推给指定群,用法见 `/uptime help` | admin |
 | `/help` | 自动生成的命令列表 | 公开 |
 
 ## 细节
@@ -48,6 +49,8 @@ docker run -d --name magibox \
 **接口巡检(`/pg`)** — 每个分组保存 URL、请求方式、header、请求体和返回模板。模板可以取状态码、按路径取 JSON 字段、读响应头,也可以把响应当图片发出来;`{body_file}` 把响应体存成文件发送(HTML 响应存成 `.html`,点开进浏览器),`{body_file["报告.html"]}` 可以改名,不写名字按 Content-Type 自动起。`{{变量}}` 引用统一管理的变量表,找不到时回退环境变量;`/pg run <组> 键=值` 临时传参,解析不到的 `{{变量}}` 会提示"需要手动填写参数"并给出用法,不会带着原文乱发请求;`/pg sched <组> <cron> [键=值]` 配定时巡检,加上断言就能在失败时告警——连续失败达到阈值才报,恢复后会补一条通知。
 
 **会话打包(`/bundle`)** — `start` 到 `end` 之间的消息会被打包成一个随机链接,无法被猜测或枚举。浏览器打开是白底圆角的聊天页面;curl 或加 `?format=json` 拿到结构化 JSON,可以直接交给 AI 处理。图片、sticker 和 20MB 以内的视频会下载并内嵌展示,文件类消息不收。
+
+**Uptime Kuma 回调(`/uptime`)** — 与 `/pg` 的主动巡检相反,这是被动接收:`/uptime new <名字>` 建一个监听,返回一条不可枚举的回调地址(`<PUBLIC_BASE_URL>/hook/uptime/<token>`,和 bundle 共用同一个 HTTP 服务),把它填到 Uptime Kuma 的「Webhook」通知里即可;`/uptime url <名字>` 单独再打印一次地址。`/uptime target <名字> here` 把通知目标绑到当前会话(群里就发群 id),回调到达时按配置解析后推过去。文案两种写法:`/uptime fields <名字> ipgroup,isbanned` 把回调 JSON 里的这些字段(支持 `monitor.name` 点路径)渲染成「字段: 值」逐行输出;`/uptime template <名字> <文案>` 用 `{a.b}` 占位自定义整段文案。带 `heartbeat.status` 的载荷(Kuma 默认格式)会自动在标题标出上线/掉线。`/uptime test <名字> [JSON]` 用示例或自带 JSON 演练一次。
 
 **在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
 
@@ -57,11 +60,12 @@ docker run -d --name magibox \
 |---|---|---|
 | `BOT_TOKEN` | (必填) | bot token |
 | `BOT_NAME` / `BOT_DESCRIPTION` / `BOT_ABOUT` | (空=不动) | 启动时同步 bot 显示名 / 描述 / 简介,等价 BotFather 的 /setname、/setdescription、/setabouttext |
-| `BUNDLE_ADDR` | `:8099` | bundle 服务监听地址 |
+| `BUNDLE_ADDR` | `:8099` | 共享 HTTP 服务监听地址(bundle 与插件回调路由都挂在这里) |
 | `BUNDLE_BASE_URL` | `http://localhost:8099` | 生成链接时的前缀 |
 | `BUNDLE_MEDIA_DIR` | `bundle-media` | 媒体文件目录 |
+| `PUBLIC_BASE_URL` | (空=同 `BUNDLE_BASE_URL`) | 插件 HTTP 路由(如 `/uptime` 回调)对外前缀,和 bundle 同一个服务;一般不用单独设 |
 | `PLUGINS_MODE` / `PLUGINS_LIST` | `blacklist` / 空 | 插件开关:blacklist=列表里的禁用,whitelist=只启用列表里的;逗号分隔,如 `PLUGINS_LIST=echo,bundle` |
-| `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` | `*.json` | 各持久化文件路径 |
+| `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` / `UPTIME_STORE` | `*.json` | 各持久化文件路径 |
 
 监听地址和链接前缀是分开的:套反向代理时,可以只监听 `127.0.0.1:8099`,把 `BUNDLE_BASE_URL` 设成对外的 https 域名。
 

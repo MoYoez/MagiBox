@@ -42,10 +42,10 @@ func TestRunReturnsBundleListenError(t *testing.T) {
 
 	err = Run()
 	if err == nil {
-		t.Fatal("Run() error = nil, want bundle listen error")
+		t.Fatal("Run() error = nil, want HTTP listen error")
 	}
-	if !strings.Contains(err.Error(), "bundle HTTP") {
-		t.Fatalf("Run() error = %q, want bundle HTTP listen context", err)
+	if !strings.Contains(err.Error(), "HTTP 服务") {
+		t.Fatalf("Run() error = %q, want HTTP listen context", err)
 	}
 }
 
