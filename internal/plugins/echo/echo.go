@@ -4,7 +4,7 @@ package echo
 import (
 	tele "gopkg.in/telebot.v3"
 
-	"github.com/moyoez/magibox/internal/plugin"
+	"github.com/moyoez/magibox/pkg/plugin"
 )
 
 type Echo struct{ plugin.Base }

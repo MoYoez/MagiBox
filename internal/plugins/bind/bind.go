@@ -9,7 +9,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 
 	"github.com/moyoez/magibox/internal/auth"
-	"github.com/moyoez/magibox/internal/plugin"
+	"github.com/moyoez/magibox/pkg/plugin"
 )
 
 type Bind struct{ plugin.Base }

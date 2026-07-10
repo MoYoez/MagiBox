@@ -5,8 +5,8 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/moyoez/magibox/internal/plugin"
 	_ "github.com/moyoez/magibox/internal/plugins" // trigger all plugins' init() self-registration
+	"github.com/moyoez/magibox/pkg/plugin"
 )
 
 // Plugins should auto-register into the registry via init() at import time.

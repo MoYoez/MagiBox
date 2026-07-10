@@ -12,7 +12,7 @@ import (
 
 	bd "github.com/moyoez/magibox/internal/bundle"
 	"github.com/moyoez/magibox/internal/config"
-	"github.com/moyoez/magibox/internal/plugin"
+	"github.com/moyoez/magibox/pkg/plugin"
 )
 
 const (

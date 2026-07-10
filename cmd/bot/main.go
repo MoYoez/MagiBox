@@ -12,7 +12,7 @@ import (
 	"github.com/moyoez/magibox/internal/bundle"
 	"github.com/moyoez/magibox/internal/config"
 	"github.com/moyoez/magibox/internal/playground"
-	"github.com/moyoez/magibox/internal/plugin"
+	"github.com/moyoez/magibox/pkg/plugin"
 
 	_ "github.com/moyoez/magibox/internal/plugins" // trigger self-registration of all plugins via init()
 )

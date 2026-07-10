@@ -19,7 +19,7 @@ import (
 
 	"github.com/moyoez/magibox/internal/auth"
 	pg "github.com/moyoez/magibox/internal/playground"
-	"github.com/moyoez/magibox/internal/plugin"
+	"github.com/moyoez/magibox/pkg/plugin"
 )
 
 const usage = `playground 用法(/pg <子命令>):
