@@ -16,7 +16,11 @@ func TestFacadeUsesInternalAuthorizationState(t *testing.T) {
 	if err := internal.SetRole(chatID, internal.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = internal.SetRole(chatID, internal.RoleUser) })
+	t.Cleanup(func() {
+		if err := internal.SetRole(chatID, internal.RoleUser); err != nil {
+			t.Errorf("reset role: %v", err)
+		}
+	})
 
 	if got := public.RoleOf(chatID); got != public.RoleAdmin {
 		t.Fatalf("RoleOf(%d) = %v, want admin", chatID, got)
