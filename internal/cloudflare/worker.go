@@ -20,6 +20,22 @@ func WorkerBoundDomains(ctx context.Context, workerName string) ([]WorkerDomain,
 	return NewClient(cred).ListWorkerDomainsByService(ctx, w.Name)
 }
 
+// ResolveWorkerZone verifies that hostname has a matching zone under the
+// worker's credential (i.e. the domain is actually bindable on Cloudflare)
+// without touching any attachment. It returns the resolved zone id/name so the
+// caller can bind, or an error the caller can surface before mutating anything.
+func ResolveWorkerZone(ctx context.Context, workerName, hostname string) (zoneID, zoneName string, err error) {
+	w, ok := GetWorker(workerName)
+	if !ok {
+		return "", "", fmt.Errorf("没有这个 worker:%s", workerName)
+	}
+	cred, ok := GetCred(w.Cred)
+	if !ok {
+		return "", "", fmt.Errorf("worker 绑定的凭据 %s 不存在", w.Cred)
+	}
+	return NewClient(cred).ResolveZoneID(ctx, hostname)
+}
+
 // ImportResult reports what ImportWorkerDomains did for one hostname.
 type ImportResult struct {
 	Hostname string

@@ -15,6 +15,7 @@ import (
 
 	cf "github.com/moyoez/magibox/internal/cloudflare"
 	"github.com/moyoez/magibox/internal/config"
+	kuma "github.com/moyoez/magibox/internal/kuma"
 	"github.com/moyoez/magibox/pkg/plugin"
 )
 
@@ -145,7 +146,7 @@ func notify(b *tele.Bot, target int64, text string) {
 
 func handleFailover(c tele.Context, args []string) error {
 	if len(args) < 2 {
-		return c.Send("用法:/cf failover add <名> <worker> [阈值] [auto|manual] | list | show <名> | target <名> <chat_id|here> | mode <名> <auto|manual> | apply <名> | test <名> <域名> | del <名>")
+		return c.Send("用法:/cf failover add <名> <worker> [阈值] [auto|manual] | list | show <名> | target <名> <chat_id|here> | mode <名> <auto|manual> | kuma <名> <kuma凭据> | apply <名> | test <名> <域名> | del <名>")
 	}
 	switch args[1] {
 	case "add":
@@ -158,6 +159,8 @@ func handleFailover(c tele.Context, args []string) error {
 		return failoverTarget(c, args)
 	case "mode":
 		return failoverMode(c, args)
+	case "kuma":
+		return failoverKuma(c, args)
 	case "apply":
 		return failoverApply(c, args)
 	case "test":
@@ -171,7 +174,7 @@ func handleFailover(c tele.Context, args []string) error {
 		}
 		return c.Send("🗑 已删除规则 " + args[2])
 	default:
-		return c.Send("未知操作 " + args[1] + "(add|list|show|target|mode|apply|test|del)")
+		return c.Send("未知操作 " + args[1] + "(add|list|show|target|mode|kuma|apply|test|del)")
 	}
 }
 
@@ -226,8 +229,12 @@ func failoverShow(c tele.Context, args []string) error {
 		return c.Send("没有这个规则:" + args[2])
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "规则:%s\nworker:%s\n阈值:连续 %d 次掉线\n模式:%s\n通知目标:%s\n回调地址:%s\n",
-		r.Name, r.Worker, r.Threshold, r.Mode, targetText(r.Target), callbackURL(r.Token))
+	kumaText := "(未关联)"
+	if r.KumaCred != "" {
+		kumaText = r.KumaCred
+	}
+	fmt.Fprintf(&sb, "规则:%s\nworker:%s\n阈值:连续 %d 次掉线\n模式:%s\nKuma 凭据:%s\n通知目标:%s\n回调地址:%s\n",
+		r.Name, r.Worker, r.Threshold, r.Mode, kumaText, targetText(r.Target), callbackURL(r.Token))
 	if pend, ok := cf.Pending(r.Name); ok {
 		fmt.Fprintf(&sb, "待确认更换:%s(发 /cf failover apply %s 执行)\n", pend, r.Name)
 	}
@@ -272,6 +279,25 @@ func failoverMode(c tele.Context, args []string) error {
 		return c.Send("失败:" + err.Error())
 	}
 	return c.Send("✅ " + args[2] + " 的模式已设为 " + string(mode))
+}
+
+// failoverKuma binds a Kuma wrapper credential to a rule. /cf provision uses it
+// to know which Kuma to create monitors on and reads the rule's token to wire
+// the callback URL, so this is the prerequisite for one-shot provisioning.
+func failoverKuma(c tele.Context, args []string) error {
+	if len(args) < 4 {
+		return c.Send("用法:/cf failover kuma <名> <kuma凭据>\n(把某条规则关联到一个 Kuma 凭据,/cf provision 建监控时用它)")
+	}
+	if _, ok := kuma.GetCred(args[3]); !ok {
+		return c.Send("没有这个 Kuma 凭据:" + args[3] + "(先 /kuma cred add)")
+	}
+	if err := cf.MutateFailover(args[2], func(r *cf.FailoverRule) error {
+		r.KumaCred = args[3]
+		return nil
+	}); err != nil {
+		return c.Send("失败:" + err.Error())
+	}
+	return c.Send(fmt.Sprintf("✅ 规则 %s 已关联 Kuma 凭据 %s。现在可以 /cf provision %s [域名] 一键上线", args[2], args[3], args[2]))
 }
 
 func failoverApply(c tele.Context, args []string) error {

@@ -40,11 +40,16 @@ Worker(绑定凭据 + 大类):
       域名已绑到别的 worker → 提示,加 force 强制替换
   /cf unbind <域名>       解绑,域名回到「未使用」
   /cf show <worker|域名>  查看当前记录
+一键上线(池选域名 → 绑定 → 建 Kuma 监控 → 挂掉线切换 webhook,全自动):
+  /cf provision <worker> [域名]
+      不给域名 → 从该 worker 大类里取一个「未使用」域名
+      前置:该 worker 已有 failover 规则,且已 /cf failover kuma 关联 Kuma 凭据
 掉线切换(联动 Uptime Kuma;监控某 worker 的域名,掉线自动/人工换池里的备用):
   /cf failover add <名> <worker> [阈值] [auto|manual]   默认阈值2、manual
   /cf failover list | show <名> | del <名>
   /cf failover target <名> <chat_id|here>              设通知目标
   /cf failover mode <名> <auto|manual>
+  /cf failover kuma <名> <kuma凭据>                    关联 Kuma 凭据(供 provision 建监控)
   /cf failover apply <名>     人工确认:执行该规则待处理的切换
   /cf failover test <名> <域名>  演练:对给定域名跑一次真实切换`
 
@@ -75,6 +80,8 @@ func handle(c tele.Context) error {
 		return handleDomain(c, args)
 	case "bind":
 		return handleBind(c, args)
+	case "provision":
+		return handleProvision(c, args)
 	case "unbind":
 		return handleUnbind(c, args)
 	case "show":
