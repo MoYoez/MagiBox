@@ -24,6 +24,7 @@ Worker(绑定凭据 + 大类):
   /cf worker add <worker> <凭据> [大类]
   /cf worker cat <worker> <大类>          改绑大类
   /cf worker domains <worker>             查该 worker 在 Cloudflare 上现有绑定的域名
+  /cf worker import <worker>              把该 worker 现有绑定的域名自动纳入记录库(标已使用)
   /cf worker list | del <worker>
 记录库(大类 / 小类 / 状态 + 生命周期字段):
   /cf domain add <大类> <域名[,域名...]> [小类]
@@ -128,7 +129,7 @@ func handleCred(c tele.Context, args []string) error {
 
 func handleWorker(c tele.Context, args []string) error {
 	if len(args) < 2 {
-		return c.Send("用法:/cf worker add <worker> <凭据> [大类] | cat <worker> <大类> | domains <worker> | list | del <worker>")
+		return c.Send("用法:/cf worker add <worker> <凭据> [大类] | cat <worker> <大类> | domains <worker> | import <worker> | list | del <worker>")
 	}
 	switch args[1] {
 	case "domains":
@@ -159,6 +160,36 @@ func handleWorker(c tele.Context, args []string) error {
 			sb.WriteString(line + "\n")
 		}
 		return c.Send(sb.String())
+	case "import":
+		if len(args) < 3 {
+			return c.Send("用法:/cf worker import <worker>\n(读取该 worker 在 Cloudflare 上现有绑定的域名,自动入库并标「已使用」)")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		results, err := cf.ImportWorkerDomains(ctx, args[2])
+		if err != nil {
+			return c.Send("失败:" + err.Error())
+		}
+		if len(results) == 0 {
+			return c.Send(args[2] + " 当前在 Cloudflare 上没有绑定任何域名,无可导入")
+		}
+		var added, updated []string
+		for _, r := range results {
+			if r.Added {
+				added = append(added, r.Hostname)
+			} else {
+				updated = append(updated, r.Hostname)
+			}
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "✅ 已导入 %s 的绑定域名(共 %d):\n", args[2], len(results))
+		if len(added) > 0 {
+			fmt.Fprintf(&sb, "新入库(%d):%s\n", len(added), strings.Join(added, ", "))
+		}
+		if len(updated) > 0 {
+			fmt.Fprintf(&sb, "已更新(%d):%s\n", len(updated), strings.Join(updated, ", "))
+		}
+		return c.Send(strings.TrimSpace(sb.String()))
 	case "add":
 		if len(args) < 4 {
 			return c.Send("用法:/cf worker add <worker> <凭据> [大类]")
@@ -210,7 +241,7 @@ func handleWorker(c tele.Context, args []string) error {
 		}
 		return c.Send("🗑 已删除 worker 记录 " + args[2])
 	default:
-		return c.Send("未知操作 " + args[1] + "(add|cat|domains|list|del)")
+		return c.Send("未知操作 " + args[1] + "(add|cat|domains|import|list|del)")
 	}
 }
 

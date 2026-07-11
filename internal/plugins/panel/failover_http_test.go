@@ -115,3 +115,42 @@ func TestPanelFailoverApplyRequiresPending(t *testing.T) {
 		t.Fatalf("apply without pending = %v, want 400", r["_status"])
 	}
 }
+
+func TestPanelWorkerImport(t *testing.T) {
+	restore := cf.SetAPIBaseForTest("")
+	defer restore()
+	srv, client := authedPanel(t, func() {
+		if err := cf.AddCred("acct", "acct-id", "tok"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cf.AddWorker("endpoint", "acct", "pool"); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Mock the Cloudflare API returning two bound domains for the worker.
+	cfmock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":[` +
+			`{"id":"d1","hostname":"a.example.com","service":"endpoint","zone_name":"example.com"},` +
+			`{"id":"d2","hostname":"b.example.com","service":"endpoint","zone_name":"example.com"}]}`))
+	}))
+	defer cfmock.Close()
+	restore2 := cf.SetAPIBaseForTest(cfmock.URL)
+	defer restore2()
+
+	r := post(t, client, srv.URL+"/panel/api/cf/worker/import", `{"worker":"endpoint"}`)
+	if r["_status"].(float64) != 200 {
+		t.Fatalf("import = %v", r)
+	}
+	added, _ := r["added"].([]any)
+	if len(added) != 2 {
+		t.Fatalf("added = %v, want 2", r["added"])
+	}
+
+	// Both domains are now in the record book, marked used + attached.
+	d, ok := cf.GetDomain("a.example.com")
+	if !ok || d.Status != cf.StatusUsed || d.Worker != "endpoint" || d.Category != "pool" {
+		t.Fatalf("imported domain = %+v (ok=%v)", d, ok)
+	}
+}
