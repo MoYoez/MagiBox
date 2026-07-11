@@ -61,7 +61,7 @@ docker run -d --name magibox \
 
 **Uptime Kuma 建监控(`/kuma`)** — 与 `/uptime`(接收 Kuma 回调)相反,这是主动调 Kuma 建监控。vanilla Kuma 没有建监控的 REST 接口,所以对接 [keithah/uptime-kuma-rest-api](https://github.com/keithah/uptime-kuma-rest-api) 这类包装器:`/kuma cred add <名> <base_url> [api_key]` 绑定包装器地址(API Key 仅在你给包装器加了鉴权时需要,以 Bearer 发送,不加就留空;显示打码)。`/kuma add <名> <域名>` 给指定域名建一个 `https://<域名>` 的 HTTP 监控;`/kuma add <名> all [大类]` 则把 `/cf` 记录库里的域名批量建监控(全局或按大类,自动跳过「被ban」)。`/kuma list <名>` 看现有监控,`/kuma del <名> <monitor_id>` 删。凭据存在 `kuma.json`(0600)。
 
-**后台面板(`panel`)** — 一个干净的网页后台,和 bundle 共用同一个 HTTP 服务,地址 `<PUBLIC_BASE_URL>/panel/`。**一次性授权码登录**:admin 在 bot 里 `/panel new` 生成一个一次性登录码,发给需要的人;在登录页输入后签发 HMAC 签名的 HttpOnly cookie,**有效期 30 天**(反代跑 https 时自动带 Secure)。码用一次即失效,`/panel list` 看待用码,`/panel revoke <码>` 撤销。面板覆盖前面几个功能:Cloudflare 域名记录(录入、改分类/状态/生命周期字段、绑定/解绑 Worker Custom Domain)、Uptime Kuma 监控(建/删/查)、以及只读查看 Worker、凭据、回调监听。带密钥的凭据/Worker 创建仍留在 bot(`/cf cred`、`/kuma cred`)。界面是密集型仪表盘风格,自适应桌面/移动,支持浅色/深色。签名密钥与待用码存在 `panel.json`(0600)。想彻底关掉面板就把 `panel` 插件加进黑名单。
+**后台面板(`panel`)** — 一个干净的网页后台,和 bundle 共用同一个 HTTP 服务,地址 `<PUBLIC_BASE_URL>/panel/`。**一次性授权码登录**:admin 在 bot 里 `/panel new` 生成一个一次性登录码,发给需要的人;在登录页输入后签发 HMAC 签名的 HttpOnly cookie,**有效期 30 天**(反代跑 https 时自动带 Secure)。码用一次即失效,`/panel list` 看待用码,`/panel revoke <码>` 撤销。面板覆盖前面几个功能:Cloudflare 域名记录(录入、改分类/状态/生命周期字段、绑定/解绑 Worker Custom Domain)、掉线切换规则(新建/删除、改模式与通知目标、复制回调地址、人工确认更换)、Uptime Kuma 监控(建/删/查)、以及只读查看 Worker、凭据、回调监听。带密钥的凭据/Worker 创建仍留在 bot(`/cf cred`、`/kuma cred`)。界面是密集型仪表盘风格,自适应桌面/移动,支持浅色/深色。签名密钥与待用码存在 `panel.json`(0600)。想彻底关掉面板就把 `panel` 插件加进黑名单。
 
 **在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
 

@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	hookPrefix   = "/hook/cf-failover/"
+	hookPrefix   = cf.FailoverHookPrefix
 	maxBodyBytes = 1 << 20 // read limit per inbound webhook
 	switchDelay  = 25 * time.Second
 )

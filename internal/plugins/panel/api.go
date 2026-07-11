@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	cf "github.com/moyoez/magibox/internal/cloudflare"
+	"github.com/moyoez/magibox/internal/config"
 	kuma "github.com/moyoez/magibox/internal/kuma"
 	up "github.com/moyoez/magibox/internal/uptime"
 )
@@ -58,6 +59,16 @@ type watcherOut struct {
 	HasTemplate bool     `json:"has_template"`
 }
 
+type failoverOut struct {
+	Name      string `json:"name"`
+	Worker    string `json:"worker"`
+	Target    int64  `json:"target"`
+	Threshold int    `json:"threshold"`
+	Mode      string `json:"mode"`
+	Callback  string `json:"callback"`          // full URL to paste into Kuma
+	Pending   string `json:"pending,omitempty"` // domain awaiting manual apply, if any
+}
+
 func stateHandler(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{}
 
@@ -79,7 +90,16 @@ func stateHandler(w http.ResponseWriter, r *http.Request) {
 			PurchasedAt: d.PurchasedAt, Usage: d.Usage, DNS: d.DNS, Ready: d.Ready, ChangedAt: d.ChangedAt,
 		})
 	}
-	out["cf"] = map[string]any{"creds": co, "workers": wo, "domains": do}
+	rules := cf.ListFailovers()
+	fo := make([]failoverOut, 0, len(rules))
+	for _, r := range rules {
+		pend, _ := cf.Pending(r.Name)
+		fo = append(fo, failoverOut{
+			Name: r.Name, Worker: r.Worker, Target: r.Target, Threshold: r.Threshold,
+			Mode: string(r.Mode), Callback: failoverCallbackURL(r.Token), Pending: pend,
+		})
+	}
+	out["cf"] = map[string]any{"creds": co, "workers": wo, "domains": do, "failovers": fo}
 
 	kcreds := kuma.ListCreds()
 	kco := make([]kumaCredOut, 0, len(kcreds))
@@ -191,6 +211,120 @@ func cfUnbindHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// --- cloudflare failover actions ---
+
+func cfFailoverAddHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name, Worker, Mode string
+		Threshold          int
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mode := cf.FailoverManual
+	if body.Mode != "" {
+		m, ok := cf.NormalizeMode(body.Mode)
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "模式只能是 auto|manual")
+			return
+		}
+		mode = m
+	}
+	rule, err := cf.AddFailover(body.Name, body.Worker, body.Threshold, mode)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "callback": failoverCallbackURL(rule.Token)})
+}
+
+func cfFailoverDelHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Name string }
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := cf.DelFailover(body.Name); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func cfFailoverTargetHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name   string
+		Target int64
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := cf.MutateFailover(body.Name, func(rule *cf.FailoverRule) error {
+		rule.Target = body.Target
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func cfFailoverModeHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Name, Mode string }
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mode, ok := cf.NormalizeMode(body.Mode)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "模式只能是 auto|manual")
+		return
+	}
+	if err := cf.MutateFailover(body.Name, func(rule *cf.FailoverRule) error {
+		rule.Mode = mode
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// cfFailoverApplyHandler executes the pending switch for a manual rule — the
+// web equivalent of /cf failover apply.
+func cfFailoverApplyHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Name string }
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	rule, ok := cf.GetFailover(body.Name)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "没有这个规则")
+		return
+	}
+	pend, ok := cf.Pending(rule.Name)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "规则当前没有待确认的切换")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	res, err := cf.SwitchWorkerDomain(ctx, rule.Worker, pend)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	cf.ClearPending(rule.Name)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bad": res.Bad, "new": res.New, "worker": res.Worker})
+}
+
+func failoverCallbackURL(token string) string {
+	return strings.TrimRight(config.PublicBaseURL(), "/") + cf.FailoverHookPrefix + token
 }
 
 // --- kuma actions ---

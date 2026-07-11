@@ -23,6 +23,12 @@ const (
 // DefaultThreshold is the consecutive-down count a rule uses when unset.
 const DefaultThreshold = 2
 
+// FailoverHookPrefix is the shared HTTP path prefix for a rule's Uptime Kuma
+// callback. The cf plugin mounts the receiver here and both the bot and the
+// panel build a rule's callback URL as PublicBaseURL + FailoverHookPrefix +
+// token, so the two stay in lockstep.
+const FailoverHookPrefix = "/hook/cf-failover/"
+
 // FailoverRule ties an Uptime Kuma callback to one worker: when a domain bound
 // to that worker goes down enough times, the rule detaches it and attaches a
 // healthy domain from the same worker's category pool.

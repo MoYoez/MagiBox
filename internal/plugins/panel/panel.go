@@ -85,6 +85,11 @@ func (Plugin) HTTPRoutes(_ *tele.Bot) []plugin.Route {
 	mux.HandleFunc("/panel/api/cf/domain/del", guard(cfDomainDelHandler))
 	mux.HandleFunc("/panel/api/cf/bind", guard(cfBindHandler))
 	mux.HandleFunc("/panel/api/cf/unbind", guard(cfUnbindHandler))
+	mux.HandleFunc("/panel/api/cf/failover/add", guard(cfFailoverAddHandler))
+	mux.HandleFunc("/panel/api/cf/failover/del", guard(cfFailoverDelHandler))
+	mux.HandleFunc("/panel/api/cf/failover/target", guard(cfFailoverTargetHandler))
+	mux.HandleFunc("/panel/api/cf/failover/mode", guard(cfFailoverModeHandler))
+	mux.HandleFunc("/panel/api/cf/failover/apply", guard(cfFailoverApplyHandler))
 	mux.HandleFunc("/panel/api/kuma/add", guard(kumaAddHandler))
 	mux.HandleFunc("/panel/api/kuma/del", guard(kumaDelHandler))
 	mux.HandleFunc("/panel/", pageHandler) // catch-all: serve the SPA shell
