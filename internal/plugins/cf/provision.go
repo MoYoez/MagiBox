@@ -139,7 +139,8 @@ func provision(ctx context.Context, workerName, domain string) string {
 	}
 
 	// Step 4 — wire the notification onto the monitor so downs reach the bot.
-	if err := client.SetMonitorNotifications(ctx, monitorID, []int{notifID}); err != nil {
+	// The wrapper attaches by monitor name (== the domain), not by id.
+	if err := client.SetMonitorNotificationsByName(ctx, live, []int{notifID}); err != nil {
 		sb.WriteString("⚠️ 绑定通知到监控失败:" + err.Error())
 		return sb.String()
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -36,23 +37,41 @@ type Monitor struct {
 	Active bool   `json:"active"`
 }
 
-// createResp tolerates the varied create-monitor response shapes wrappers
-// return (id / monitorId, plus an optional message).
+// createResp tolerates the varied create response shapes the wrapper returns.
+// The keithah wrapper answers monitor creates with {"monitorID":N,...} and
+// notification creates with {"id":N,...}; older shapes used id/monitorId, all
+// covered here (JSON field matching is case-insensitive but we list both cases
+// explicitly to be safe).
 type createResp struct {
-	ID        int    `json:"id"`
-	MonitorID int    `json:"monitorId"`
-	Msg       string `json:"msg"`
+	ID          int    `json:"id"`
+	MonitorID   int    `json:"monitorId"`
+	MonitorIDUp int    `json:"monitorID"`
+	Msg         string `json:"msg"`
+}
+
+func (r createResp) monitorID() int {
+	switch {
+	case r.MonitorIDUp != 0:
+		return r.MonitorIDUp
+	case r.MonitorID != 0:
+		return r.MonitorID
+	default:
+		return r.ID
+	}
 }
 
 // CreateMonitor creates an HTTP monitor named name pointing at url. It returns
 // the new monitor id when the wrapper reports one (0 if it does not) plus any
-// message.
+// message. conditions is sent explicitly as an empty list: Uptime Kuma 2.x has
+// a NOT NULL constraint on monitor.conditions and the wrapper does not default
+// it, so omitting it makes creation fail on 2.x.
 func (c *Client) CreateMonitor(ctx context.Context, name, url string) (id int, msg string, err error) {
 	body := map[string]any{
-		"type":     "http",
-		"name":     name,
-		"url":      url,
-		"interval": 60,
+		"type":       "http",
+		"name":       name,
+		"url":        url,
+		"interval":   60,
+		"conditions": []any{},
 	}
 	data, err := c.do(ctx, http.MethodPost, "/monitors", body)
 	if err != nil {
@@ -60,23 +79,34 @@ func (c *Client) CreateMonitor(ctx context.Context, name, url string) (id int, m
 	}
 	var r createResp
 	_ = sonic.Unmarshal(data, &r)
-	if r.ID != 0 {
-		return r.ID, r.Msg, nil
-	}
-	return r.MonitorID, r.Msg, nil
+	return r.monitorID(), r.Msg, nil
 }
 
-// ListMonitors returns the wrapper's monitors, tolerating either a bare array
-// or an object wrapping them under "monitors".
+// ListMonitors returns the wrapper's monitors. The keithah wrapper answers with
+// {"count":N,"monitors":{"<id>":{...}}} (a map keyed by id string); older/other
+// shapes use a bare array or {"monitors":[...]}. All three are tolerated.
 func (c *Client) ListMonitors(ctx context.Context) ([]Monitor, error) {
 	data, err := c.do(ctx, http.MethodGet, "/monitors", nil)
 	if err != nil {
 		return nil, err
 	}
+	// Map form: {"monitors": {"1": {...}, "2": {...}}}.
+	var mapped struct {
+		Monitors map[string]Monitor `json:"monitors"`
+	}
+	if err := sonic.Unmarshal(data, &mapped); err == nil && mapped.Monitors != nil {
+		out := make([]Monitor, 0, len(mapped.Monitors))
+		for _, m := range mapped.Monitors {
+			out = append(out, m)
+		}
+		return out, nil
+	}
+	// Bare array form.
 	var arr []Monitor
 	if err := sonic.Unmarshal(data, &arr); err == nil {
 		return arr, nil
 	}
+	// Array-under-"monitors" form.
 	var wrapped struct {
 		Monitors []Monitor `json:"monitors"`
 	}
@@ -172,16 +202,40 @@ func (c *Client) FindNotificationByName(ctx context.Context, name string) (Notif
 	return Notification{}, false, nil
 }
 
-// SetMonitorNotifications attaches the given notification ids to a monitor
-// (replacing whatever it had). The keithah wrapper exposes this as
-// PUT /monitors/set-notifications with {monitor_id, notification_ids}.
-func (c *Client) SetMonitorNotifications(ctx context.Context, monitorID int, notificationIDs []int) error {
-	body := map[string]any{
-		"monitor_id":       monitorID,
-		"notification_ids": notificationIDs,
+// setNotificationsResp is the keithah wrapper's set-notifications answer. It
+// returns HTTP 200 even when zero monitors matched the filter, so we must read
+// successful/total rather than trust the status code.
+type setNotificationsResp struct {
+	Total      int `json:"total"`
+	Successful int `json:"successful"`
+	Failed     int `json:"failed"`
+}
+
+// SetMonitorNotificationsByName attaches the given notification ids to the
+// monitor whose name equals monitorName, replacing whatever it had.
+//
+// The keithah wrapper's PUT /monitors/set-notifications selects monitors by
+// filter (group/tag/name_pattern/type), NOT by id — an empty filter would
+// match every monitor. We target exactly one via name_pattern set to the
+// monitor name. Monitor names here are hostnames, which contain no fnmatch
+// wildcards (* ? [), so the pattern matches that single monitor exactly. It
+// errors if nothing matched (successful == 0), since the wrapper answers 200
+// in that case.
+func (c *Client) SetMonitorNotificationsByName(ctx context.Context, monitorName string, notificationIDs []int) error {
+	body := map[string]any{"notification_ids": notificationIDs}
+	path := "/monitors/set-notifications?name_pattern=" + url.QueryEscape(monitorName)
+	data, err := c.do(ctx, http.MethodPut, path, body)
+	if err != nil {
+		return err
 	}
-	_, err := c.do(ctx, http.MethodPut, "/monitors/set-notifications", body)
-	return err
+	var r setNotificationsResp
+	if err := sonic.Unmarshal(data, &r); err != nil {
+		return fmt.Errorf("无法解析绑定结果: %s", snippet(data))
+	}
+	if r.Successful == 0 {
+		return fmt.Errorf("没有匹配到监控「%s」,通知未绑定(该域名的监控是否已建?)", monitorName)
+	}
+	return nil
 }
 
 // do performs a request and returns the raw response body, treating any

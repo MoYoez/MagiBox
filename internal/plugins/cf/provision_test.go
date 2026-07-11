@@ -39,7 +39,7 @@ type kumaRecorder struct {
 	createdMonitor bool
 	createdNotif   bool
 	setNotif       bool
-	boundMonitorID int
+	boundName      string
 	boundNotifIDs  []any
 }
 
@@ -61,14 +61,12 @@ func kumaMock(t *testing.T, rec *kumaRecorder) *httptest.Server {
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 77})
 		case r.Method == http.MethodPut && r.URL.Path == "/monitors/set-notifications":
 			rec.setNotif = true
+			rec.boundName = r.URL.Query().Get("name_pattern")
 			body, _ := io.ReadAll(r.Body)
 			var m map[string]any
 			_ = json.Unmarshal(body, &m)
-			if id, ok := m["monitor_id"].(float64); ok {
-				rec.boundMonitorID = int(id)
-			}
 			rec.boundNotifIDs, _ = m["notification_ids"].([]any)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]any{"total": 1, "successful": 1, "failed": 0})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -126,8 +124,8 @@ func TestProvisionEndToEnd(t *testing.T) {
 		t.Fatalf("kuma calls: monitor=%v notif=%v set=%v, want all true",
 			rec.createdMonitor, rec.createdNotif, rec.setNotif)
 	}
-	if rec.boundMonitorID != 55 || len(rec.boundNotifIDs) != 1 || rec.boundNotifIDs[0] != float64(77) {
-		t.Fatalf("bound monitor=%d notifs=%v, want 55 / [77]", rec.boundMonitorID, rec.boundNotifIDs)
+	if rec.boundName != "new.example.com" || len(rec.boundNotifIDs) != 1 || rec.boundNotifIDs[0] != float64(77) {
+		t.Fatalf("bound name=%q notifs=%v, want new.example.com / [77]", rec.boundName, rec.boundNotifIDs)
 	}
 }
 
