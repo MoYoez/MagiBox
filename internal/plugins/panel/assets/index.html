@@ -140,6 +140,7 @@ const ICON={
   activity:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>',
   bell:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   box:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+  shuffle:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>',
 };
 let STATE=null, TAB='domains', kumaMonitors={};
 
@@ -175,6 +176,7 @@ const NAV=[
     {id:'domains',label:'域名',icon:'globe'},
     {id:'workers',label:'Worker',icon:'server'},
     {id:'creds',label:'凭据',icon:'key'},
+    {id:'failover',label:'掉线切换',icon:'shuffle'},
   ]},
   {group:'监控',items:[
     {id:'kuma',label:'Uptime Kuma',icon:'activity'},
@@ -197,11 +199,11 @@ function renderShell(){
   $('#logout',app).onclick=async()=>{await api('/api/logout',{method:'POST'});renderLogin();};
   renderTab();
 }
-const TITLES={domains:'域名记录',workers:'Worker',creds:'Cloudflare 凭据',kuma:'Uptime Kuma 监控',uptime:'回调监听'};
+const TITLES={domains:'域名记录',workers:'Worker',creds:'Cloudflare 凭据',failover:'掉线切换',kuma:'Uptime Kuma 监控',uptime:'回调监听'};
 function renderTab(){
   $('#tabTitle').textContent=TITLES[TAB]||'';
   const m=$('#main'); m.innerHTML='';
-  ({domains:tabDomains,workers:tabWorkers,creds:tabCreds,kuma:tabKuma,uptime:tabUptime}[TAB]||(()=>{}))(m);
+  ({domains:tabDomains,workers:tabWorkers,creds:tabCreds,failover:tabFailover,kuma:tabKuma,uptime:tabUptime}[TAB]||(()=>{}))(m);
 }
 
 /* ---------- domains ---------- */
@@ -342,6 +344,84 @@ function tabCreds(m){
   if(!cs.length) tb.appendChild(h('<tr><td colspan="3"><div class="empty">还没有凭据</div></td></tr>'));
   cs.forEach(c=>tb.appendChild(h(`<tr><td>${esc(c.name)}</td><td class="mono">${esc(c.account_id)}</td><td class="mono muted">${esc(c.token)}</td></tr>`)));
   m.appendChild(card);
+}
+
+/* ---------- failover ---------- */
+function modeBadge(mode){const auto=mode==='auto';return `<span class="badge ${auto?'used':'unused'}">${auto?'自动':'人工'}</span>`;}
+function tabFailover(m){
+  const rules=(STATE.cf.failovers)||[], workers=STATE.cf.workers;
+
+  const add=h(`<div class="card"><h2>新建切换规则</h2><div class="body"><div class="row">
+    <input id="foName" placeholder="规则名(a-z0-9_)" style="width:160px">
+    <select id="foWorker"><option value="">选择 worker</option>${workers.map(w=>`<option value="${esc(w.name)}">${esc(w.name)}${w.category?(' ['+esc(w.category)+']'):''}</option>`).join('')}</select>
+    <input id="foThreshold" type="number" min="1" value="2" title="连续掉线次数" style="width:90px">
+    <select id="foMode"><option value="manual">人工确认</option><option value="auto">自动切换</option></select>
+    <button class="btn" id="foAdd">创建</button></div>
+    <p class="muted" style="margin:8px 0 0;font-size:12px">监控某 worker 上的域名:连续掉线达阈值后,从它自己大类池里换一个「未使用」域名,坏域名标 ban。worker 需先绑好大类。创建后把回调地址填进 Kuma 对应 monitor 的 Webhook 通知。</p>
+  </div></div>`);
+  add.querySelector('#foAdd').onclick=async()=>{
+    const name=$('#foName',add).value.trim(), worker=$('#foWorker',add).value;
+    const threshold=parseInt($('#foThreshold',add).value,10)||2, mode=$('#foMode',add).value;
+    if(!name||!worker) return toast('规则名和 worker 必填',true);
+    try{const r=await api('/api/cf/failover/add',{method:'POST',body:JSON.stringify({name,worker,threshold,mode})});
+      toast('已创建'); await copyText(r.callback); boot();
+    }catch(e){toast(e.message,true);}
+  };
+  m.appendChild(add);
+
+  const card=h(`<div class="card"><div class="tablewrap"><table><thead><tr>
+    <th>规则</th><th>worker</th><th>阈值</th><th>模式</th><th>通知目标</th><th>状态</th><th></th>
+  </tr></thead><tbody id="fobody"></tbody></table></div></div>`);
+  m.appendChild(card);
+  const tb=$('#fobody',card);
+  if(!rules.length){tb.appendChild(h('<tr><td colspan="7"><div class="empty">还没有切换规则</div></td></tr>'));return;}
+  rules.forEach(r=>{
+    const pend=r.pending?`<span class="badge banned" title="待确认更换">⏳ ${esc(r.pending)}</span>`:'<span class="muted">正常</span>';
+    const tr=h(`<tr>
+      <td class="mono">${esc(r.name)}</td><td>${esc(r.worker)}</td><td>连续 ${r.threshold} 次</td>
+      <td>${modeBadge(r.mode)}</td><td class="mono">${r.target?r.target:'<span class="muted">未设</span>'}</td>
+      <td>${pend}</td>
+      <td><div class="actions">
+        ${r.pending?'<button class="btn sm" data-a="apply">确认更换</button>':''}
+        <button class="btn ghost sm" data-a="cb">回调</button>
+        <button class="btn ghost sm" data-a="edit">编辑</button>
+        <button class="btn danger sm" data-a="del">删</button>
+      </div></td></tr>`);
+    const ap=tr.querySelector('[data-a=apply]'); if(ap) ap.onclick=()=>applyFailover(r);
+    tr.querySelector('[data-a=cb]').onclick=()=>copyText(r.callback);
+    tr.querySelector('[data-a=edit]').onclick=()=>editFailover(r);
+    tr.querySelector('[data-a=del]').onclick=()=>delFailover(r);
+    tb.appendChild(tr);
+  });
+}
+function editFailover(r){
+  openModal(`编辑 ${esc(r.name)}`,`
+    <div class="field"><label>模式</label><select id="f_mode">
+      <option value="manual" ${r.mode==='manual'?'selected':''}>人工确认</option>
+      <option value="auto" ${r.mode==='auto'?'selected':''}>自动切换</option></select></div>
+    <div class="field"><label>通知目标 chat_id(留空为不设)</label><input id="f_target" value="${r.target||''}" placeholder="如 -1001234567890"></div>
+    <div class="field"><label>回调地址(填进 Kuma 的 Webhook 通知)</label><input value="${esc(r.callback)}" readonly onclick="this.select()"></div>
+  `,async(root)=>{
+    const mode=$('#f_mode',root).value, target=parseInt($('#f_target',root).value.trim(),10)||0;
+    if(mode!==r.mode) await api('/api/cf/failover/mode',{method:'POST',body:JSON.stringify({name:r.name,mode})});
+    if(target!==(r.target||0)) await api('/api/cf/failover/target',{method:'POST',body:JSON.stringify({name:r.name,target})});
+    toast('已保存'); boot();
+  });
+}
+async function applyFailover(r){
+  if(!confirm(`确认更换 ${r.name} 的坏域名 ${r.pending}?将解绑并标 ban,换池里一个未使用域名顶上。`))return;
+  try{const x=await api('/api/cf/failover/apply',{method:'POST',body:JSON.stringify({name:r.name})});
+    toast(`已切换:${x.bad} → ${x.new}`); boot();
+  }catch(e){toast(e.message,true);}
+}
+async function delFailover(r){
+  if(!confirm(`删除规则 ${r.name}?`))return;
+  try{await api('/api/cf/failover/del',{method:'POST',body:JSON.stringify({name:r.name})});toast('已删除');boot();}
+  catch(e){toast(e.message,true);}
+}
+async function copyText(text){
+  try{await navigator.clipboard.writeText(text);toast('回调地址已复制到剪贴板');}
+  catch(e){prompt('回调地址(手动复制):',text);}
 }
 
 /* ---------- kuma ---------- */
