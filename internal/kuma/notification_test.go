@@ -61,27 +61,41 @@ func TestFindMonitorByName(t *testing.T) {
 	}
 }
 
-func TestSetMonitorNotificationsBody(t *testing.T) {
+func TestSetMonitorNotificationsByName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/monitors/set-notifications" {
 			t.Errorf("got %s %s, want PUT /monitors/set-notifications", r.Method, r.URL.Path)
 		}
+		// The monitor is targeted by name_pattern, not a body monitor_id.
+		if got := r.URL.Query().Get("name_pattern"); got != "a.example.com" {
+			t.Errorf("name_pattern = %q, want a.example.com", got)
+		}
 		body, _ := io.ReadAll(r.Body)
 		var m map[string]any
 		_ = json.Unmarshal(body, &m)
-		if m["monitor_id"] != float64(11) {
-			t.Errorf("monitor_id = %v, want 11", m["monitor_id"])
-		}
 		ids, _ := m["notification_ids"].([]any)
 		if len(ids) != 1 || ids[0] != float64(9) {
 			t.Errorf("notification_ids = %v, want [9]", m["notification_ids"])
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"total": 1, "successful": 1, "failed": 0})
 	}))
 	defer srv.Close()
 
-	err := NewClient(&Cred{BaseURL: srv.URL}).SetMonitorNotifications(context.Background(), 11, []int{9})
+	err := NewClient(&Cred{BaseURL: srv.URL}).SetMonitorNotificationsByName(context.Background(), "a.example.com", []int{9})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSetMonitorNotificationsByNameNoMatch(t *testing.T) {
+	// Wrapper answers 200 even when zero monitors matched; that must be an error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "No monitors found", "updated": 0})
+	}))
+	defer srv.Close()
+
+	err := NewClient(&Cred{BaseURL: srv.URL}).SetMonitorNotificationsByName(context.Background(), "missing.example.com", []int{9})
+	if err == nil {
+		t.Fatal("want error when no monitor matched, got nil")
 	}
 }
