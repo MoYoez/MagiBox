@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -127,8 +128,18 @@ func (c *Client) ResolveZoneID(ctx context.Context, hostname string) (id, name s
 // ListWorkerDomainsByHostname returns Custom Domain attachments for a hostname
 // (usually zero or one).
 func (c *Client) ListWorkerDomainsByHostname(ctx context.Context, hostname string) ([]WorkerDomain, error) {
+	return c.listWorkerDomains(ctx, "hostname="+url.QueryEscape(hostname))
+}
+
+// ListWorkerDomainsByService returns all Custom Domain attachments bound to a
+// worker (service).
+func (c *Client) ListWorkerDomainsByService(ctx context.Context, service string) ([]WorkerDomain, error) {
+	return c.listWorkerDomains(ctx, "service="+url.QueryEscape(service))
+}
+
+func (c *Client) listWorkerDomains(ctx context.Context, query string) ([]WorkerDomain, error) {
 	var out []WorkerDomain
-	path := fmt.Sprintf("/accounts/%s/workers/domains?hostname=%s", c.accountID, hostname)
+	path := fmt.Sprintf("/accounts/%s/workers/domains?%s", c.accountID, query)
 	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
