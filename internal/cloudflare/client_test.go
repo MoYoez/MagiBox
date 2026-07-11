@@ -84,6 +84,39 @@ func TestAttachWorkerDomainSendsBody(t *testing.T) {
 	}
 }
 
+func TestWorkerBoundDomains(t *testing.T) {
+	freshStore(t)
+	if err := AddCred("acct", "acct-id", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddWorker("api", "acct", ""); err != nil {
+		t.Fatal(err)
+	}
+	mockCF(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("service"); got != "api" {
+			t.Errorf("service query = %q, want api", got)
+		}
+		ok(w, []WorkerDomain{
+			{ID: "d1", Hostname: "a.example.com", Service: "api", ZoneName: "example.com"},
+			{ID: "d2", Hostname: "b.example.com", Service: "api", ZoneName: "example.com"},
+		})
+	})
+	ds, err := WorkerBoundDomains(context.Background(), "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ds) != 2 || ds[0].Hostname != "a.example.com" {
+		t.Fatalf("bound domains = %+v", ds)
+	}
+}
+
+func TestWorkerBoundDomainsUnknownWorker(t *testing.T) {
+	freshStore(t)
+	if _, err := WorkerBoundDomains(context.Background(), "nope"); err == nil {
+		t.Fatal("want error for unknown worker")
+	}
+}
+
 func TestAPIErrorSurfaced(t *testing.T) {
 	mockCF(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
