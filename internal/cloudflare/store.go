@@ -88,24 +88,33 @@ func NormalizeStatus(s string) (string, bool) {
 }
 
 type store struct {
-	mu      sync.RWMutex
-	path    string
-	creds   map[string]*Cred
-	workers map[string]*Worker
-	domains map[string]*Domain
+	mu        sync.RWMutex
+	path      string
+	creds     map[string]*Cred
+	workers   map[string]*Worker
+	domains   map[string]*Domain
+	failovers map[string]*FailoverRule
 }
 
 var def = &store{
-	creds:   map[string]*Cred{},
-	workers: map[string]*Worker{},
-	domains: map[string]*Domain{},
+	creds:     map[string]*Cred{},
+	workers:   map[string]*Worker{},
+	domains:   map[string]*Domain{},
+	failovers: map[string]*FailoverRule{},
 }
 
-// Init loads persisted state from path (created lazily on first save).
+// Init loads persisted state from path (created lazily on first save). It
+// starts from an empty store so a re-Init (e.g. between tests) does not retain
+// state from a previous path.
 func Init(path string) error {
 	def.mu.Lock()
 	defer def.mu.Unlock()
 	def.path = path
+	def.creds = map[string]*Cred{}
+	def.workers = map[string]*Worker{}
+	def.domains = map[string]*Domain{}
+	def.failovers = map[string]*FailoverRule{}
+	resetFailoverState()
 	return def.load()
 }
 
@@ -334,9 +343,10 @@ func DelDomain(name string) error {
 // --- Persistence (JSON); load/save run with the lock held ---
 
 type fileModel struct {
-	Creds   []*Cred   `json:"creds"`
-	Workers []*Worker `json:"workers"`
-	Domains []*Domain `json:"domains"`
+	Creds     []*Cred         `json:"creds"`
+	Workers   []*Worker       `json:"workers"`
+	Domains   []*Domain       `json:"domains"`
+	Failovers []*FailoverRule `json:"failovers,omitempty"`
 }
 
 func (s *store) load() error {
@@ -363,6 +373,15 @@ func (s *store) load() error {
 	for _, d := range m.Domains {
 		s.domains[d.Name] = d
 	}
+	for _, f := range m.Failovers {
+		if f.Mode == "" {
+			f.Mode = FailoverManual
+		}
+		if f.Threshold <= 0 {
+			f.Threshold = DefaultThreshold
+		}
+		s.failovers[f.Name] = f
+	}
 	return nil
 }
 
@@ -377,9 +396,13 @@ func (s *store) save() error {
 	for _, d := range s.domains {
 		m.Domains = append(m.Domains, d)
 	}
+	for _, f := range s.failovers {
+		m.Failovers = append(m.Failovers, f)
+	}
 	sort.Slice(m.Creds, func(i, j int) bool { return m.Creds[i].Name < m.Creds[j].Name })
 	sort.Slice(m.Workers, func(i, j int) bool { return m.Workers[i].Name < m.Workers[j].Name })
 	sort.Slice(m.Domains, func(i, j int) bool { return m.Domains[i].Name < m.Domains[j].Name })
+	sort.Slice(m.Failovers, func(i, j int) bool { return m.Failovers[i].Name < m.Failovers[j].Name })
 	data, err := sonic.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

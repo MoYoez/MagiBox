@@ -17,6 +17,15 @@ import (
 // apiBase is the Cloudflare API v4 root (a var so tests can point it at a mock).
 var apiBase = "https://api.cloudflare.com/client/v4"
 
+// SetAPIBaseForTest points the Cloudflare API root at url and returns a function
+// that restores the previous value. It exists so tests in other packages (e.g.
+// the cf plugin) can drive the client against an httptest mock.
+func SetAPIBaseForTest(url string) (restore func()) {
+	prev := apiBase
+	apiBase = url
+	return func() { apiBase = prev }
+}
+
 // Client talks to the Cloudflare API with one credential's scoped token.
 type Client struct {
 	accountID string
