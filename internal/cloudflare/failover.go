@@ -33,12 +33,13 @@ const FailoverHookPrefix = "/hook/cf-failover/"
 // to that worker goes down enough times, the rule detaches it and attaches a
 // healthy domain from the same worker's category pool.
 type FailoverRule struct {
-	Name      string       `json:"name"`      // identifier, matches nameRe
-	Token     string       `json:"token"`     // secret path segment of the callback URL
-	Worker    string       `json:"worker"`    // worker whose domains this rule guards
-	Target    int64        `json:"target"`    // chat id to notify (0 = not set yet)
-	Threshold int          `json:"threshold"` // consecutive downs before acting
-	Mode      FailoverMode `json:"mode"`      // auto | manual
+	Name      string       `json:"name"`                // identifier, matches nameRe
+	Token     string       `json:"token"`               // secret path segment of the callback URL
+	Worker    string       `json:"worker"`              // worker whose domains this rule guards
+	Target    int64        `json:"target"`              // chat id to notify (0 = not set yet)
+	Threshold int          `json:"threshold"`           // consecutive downs before acting
+	Mode      FailoverMode `json:"mode"`                // auto | manual
+	KumaCred  string       `json:"kuma_cred,omitempty"` // Kuma wrapper cred used to create monitors during provision
 }
 
 // NormalizeMode maps a user-supplied mode to a canonical value.
@@ -104,6 +105,27 @@ func GetFailoverByToken(token string) (*FailoverRule, bool) {
 		}
 	}
 	return nil, false
+}
+
+// FailoverByWorker returns a copy of the rule guarding worker, if any. When a
+// worker has more than one rule (unusual) the lexicographically first by name
+// is returned for determinism.
+func FailoverByWorker(worker string) (*FailoverRule, bool) {
+	def.mu.RLock()
+	defer def.mu.RUnlock()
+	var found *FailoverRule
+	for _, r := range def.failovers {
+		if r.Worker != worker {
+			continue
+		}
+		if found == nil || r.Name < found.Name {
+			found = r
+		}
+	}
+	if found == nil {
+		return nil, false
+	}
+	return cloneFailover(found), true
 }
 
 // ListFailovers returns copies of all rules, sorted by name.
