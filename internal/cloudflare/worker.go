@@ -19,3 +19,59 @@ func WorkerBoundDomains(ctx context.Context, workerName string) ([]WorkerDomain,
 	}
 	return NewClient(cred).ListWorkerDomainsByService(ctx, w.Name)
 }
+
+// ImportResult reports what ImportWorkerDomains did for one hostname.
+type ImportResult struct {
+	Hostname string
+	Added    bool // newly inserted into the record book
+	Updated  bool // already present, re-pointed to this worker / marked used
+}
+
+// ImportWorkerDomains reads a worker's live Custom Domains from Cloudflare and
+// reconciles them into the record book so they become managed without the user
+// typing any hostnames. Each bound hostname is:
+//   - inserted under the worker's category (or "default" if it has none) and
+//     marked used + attached to this worker, if not already recorded; or
+//   - if already recorded, marked used and (re)attached to this worker,
+//     leaving its existing category/lifecycle fields untouched.
+//
+// It never touches Cloudflare (read-only there) and never bans or unbinds; it
+// only makes the local book reflect what the worker actually serves.
+func ImportWorkerDomains(ctx context.Context, workerName string) ([]ImportResult, error) {
+	w, ok := GetWorker(workerName)
+	if !ok {
+		return nil, fmt.Errorf("没有这个 worker:%s", workerName)
+	}
+	bound, err := WorkerBoundDomains(ctx, workerName)
+	if err != nil {
+		return nil, err
+	}
+	cat := w.Category
+	if cat == "" {
+		cat = "default"
+	}
+	results := make([]ImportResult, 0, len(bound))
+	for _, b := range bound {
+		host := b.Hostname
+		if _, exists := GetDomain(host); !exists {
+			if err := AddDomain(cat, host, ""); err != nil {
+				// Skip malformed hostnames rather than aborting the whole import.
+				continue
+			}
+			_ = MutateDomain(host, func(d *Domain) error {
+				d.Status = StatusUsed
+				d.Worker = w.Name
+				return nil
+			})
+			results = append(results, ImportResult{Hostname: host, Added: true})
+			continue
+		}
+		_ = MutateDomain(host, func(d *Domain) error {
+			d.Status = StatusUsed
+			d.Worker = w.Name
+			return nil
+		})
+		results = append(results, ImportResult{Hostname: host, Updated: true})
+	}
+	return results, nil
+}

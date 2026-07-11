@@ -329,12 +329,26 @@ async function unbindDomain(x){
 function tabWorkers(m){
   const ws=STATE.cf.workers;
   const card=h(`<div class="card"><h2>Worker(创建/删除在 bot 里 /cf worker)</h2><div class="tablewrap"><table>
-    <thead><tr><th>名称</th><th>凭据</th><th>大类</th><th>环境</th></tr></thead><tbody></tbody></table></div></div>`);
+    <thead><tr><th>名称</th><th>凭据</th><th>大类</th><th>环境</th><th></th></tr></thead><tbody></tbody></table></div></div>`);
   const tb=card.querySelector('tbody');
-  if(!ws.length) tb.appendChild(h('<tr><td colspan="4"><div class="empty">还没有 worker</div></td></tr>'));
-  ws.forEach(w=>tb.appendChild(h(`<tr><td class="mono">${esc(w.name)}</td><td>${esc(w.cred)}</td>
-    <td>${w.category?esc(w.category):'<span class="muted">—</span>'}</td><td class="muted">${esc(w.env)}</td></tr>`)));
+  if(!ws.length) tb.appendChild(h('<tr><td colspan="5"><div class="empty">还没有 worker</div></td></tr>'));
+  ws.forEach(w=>{
+    const tr=h(`<tr><td class="mono">${esc(w.name)}</td><td>${esc(w.cred)}</td>
+      <td>${w.category?esc(w.category):'<span class="muted">—</span>'}</td><td class="muted">${esc(w.env)}</td>
+      <td><div class="actions"><button class="btn ghost sm" data-a="import" title="读取该 worker 在 Cloudflare 上现有绑定的域名,自动纳入记录库">导入现有域名</button></div></td></tr>`);
+    tr.querySelector('[data-a=import]').onclick=()=>importWorker(w.name);
+    tb.appendChild(tr);
+  });
   m.appendChild(card);
+}
+async function importWorker(name){
+  if(!confirm(`从 Cloudflare 读取 ${name} 现有绑定的域名并纳入记录库?\n(会标记为「已使用」并归到该 worker 分类,不改动 Cloudflare)`))return;
+  try{
+    const r=await api('/api/cf/worker/import',{method:'POST',body:JSON.stringify({worker:name})});
+    const n=(r.added?r.added.length:0)+(r.updated?r.updated.length:0);
+    toast(n?`已导入 ${n} 个域名`:'该 worker 在 Cloudflare 上没有绑定域名');
+    boot();
+  }catch(e){toast(e.message,true);}
 }
 function tabCreds(m){
   const cs=STATE.cf.creds;

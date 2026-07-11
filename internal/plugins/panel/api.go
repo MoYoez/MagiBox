@@ -213,6 +213,32 @@ func cfUnbindHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// cfWorkerImportHandler reads a worker's live Custom Domains from Cloudflare and
+// reconciles them into the record book (read-only on Cloudflare's side).
+func cfWorkerImportHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Worker string }
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	results, err := cf.ImportWorkerDomains(ctx, body.Worker)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	added, updated := []string{}, []string{}
+	for _, x := range results {
+		if x.Added {
+			added = append(added, x.Hostname)
+		} else {
+			updated = append(updated, x.Hostname)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": added, "updated": updated})
+}
+
 // --- cloudflare failover actions ---
 
 func cfFailoverAddHandler(w http.ResponseWriter, r *http.Request) {
