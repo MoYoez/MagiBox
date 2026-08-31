@@ -35,7 +35,8 @@ docker run -d --name magibox \
 | `/ping` | 存活检测 | 公开 |
 | `/whoami` | 查看 chat id / user id 和角色;在群里会带上群 id;回复某条消息可以看对方的 id | 公开 |
 | `/bind <码>` | 用终端打印的配对码绑定 owner | 公开 |
-| `/members` | 列出所有 admin / owner | admin |
+| `/members` | 列出所有角色与显式业务权限 | admin |
+| `/permission grant/revoke/show/list` | 给账号叠加、撤销或查看业务权限；支持回复目标消息 | owner |
 | `/promote` `/demote <chat_id>` | 升降角色,也可以直接回复目标消息;promote 一个群 id 后,推送会发到那个群 | owner |
 | `/pg` | HTTP 接口 playground,用法见 `/pg help` | admin |
 | `/pg_run` `/pg_sched` `/pg_new` … | `/pg` 子命令的独立版本,参数相同,输 `/` 有补全 | admin |
@@ -46,6 +47,16 @@ docker run -d --name magibox \
 | `/kuma` | Uptime Kuma REST 包装器管理:绑定地址/Key,给指定域名或整个大类批量建监控,用法见 `/kuma help` | admin |
 | `/panel` | 生成后台面板的一次性登录码:`/panel new|list|revoke` | admin |
 | `/help` | 自动生成的命令列表 | 公开 |
+
+角色与业务权限相互独立。普通用户可以同时叠加多个形如 `auth:aff` 的权限；
+`/demote` 只移除 admin 角色，不会清空已经显式授予的业务权限。Admin/Owner
+兼容性继承全部业务权限。示例：
+
+```text
+/permission grant 123456789 auth:aff auth:report
+/permission show 123456789
+/permission revoke 123456789 auth:report
+```
 
 ## 细节
 
@@ -99,7 +110,8 @@ func init() { plugin.Register(Plugin{}) }
 ```
 
 仓库外插件使用独立 Go Module，导入 `pkg/plugin`；需要管理员权限时使用
-`pkg/auth.RequireAdmin()`。独立宿主先空导入自己的插件集合，再调用共享启动入口：
+`pkg/auth.RequireAdmin()`，需要可叠加业务权限时使用
+`pkg/auth.RequirePermission("auth:your-scope")`。独立宿主先空导入自己的插件集合，再调用共享启动入口：
 
 ```go
 package main

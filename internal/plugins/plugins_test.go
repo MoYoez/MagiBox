@@ -22,7 +22,7 @@ func TestPluginsSelfRegister(t *testing.T) {
 func TestCommandsCollected(t *testing.T) {
 	want := map[string]bool{
 		"echo": false, "ping": false, "whoami": false,
-		"bind": false, "members": false, "promote": false, "demote": false,
+		"bind": false, "members": false, "permission": false, "promote": false, "demote": false,
 		"pg": false, "bundle": false,
 		// standalone /pg_* subcommands
 		"pg_run": false, "pg_sched": false, "pg_new": false, "pg_var": false,

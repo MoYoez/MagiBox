@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -64,5 +65,104 @@ func TestRoleFlow(t *testing.T) {
 	// Roles should have been persisted.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("应已持久化: %v", err)
+	}
+}
+
+func TestComposablePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+
+	const chatID int64 = 3003
+	if err := GrantPermissions(chatID, "AUTH:AFF", "auth:report", "auth:aff"); err != nil {
+		t.Fatal(err)
+	}
+	if got := RoleOf(chatID); got != RoleUser {
+		t.Fatalf("role = %s, want user", got)
+	}
+	if !HasPermission(chatID, "auth:aff") || !HasPermission(chatID, "auth:report") {
+		t.Fatal("ordinary user should receive stacked explicit permissions")
+	}
+	if got := Permissions(chatID); !slices.Equal(got, []Permission{"auth:aff", "auth:report"}) {
+		t.Fatalf("permissions = %v", got)
+	}
+
+	if err := SetRole(chatID, RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if !HasPermission(chatID, "auth:anything") {
+		t.Fatal("admin should inherit business permissions")
+	}
+	if err := SetRole(chatID, RoleUser); err != nil {
+		t.Fatal(err)
+	}
+	if !HasPermission(chatID, "auth:aff") {
+		t.Fatal("demoting a role must preserve explicit permissions")
+	}
+
+	if err := RevokePermissions(chatID, "auth:aff"); err != nil {
+		t.Fatal(err)
+	}
+	if HasPermission(chatID, "auth:aff") || !HasPermission(chatID, "auth:report") {
+		t.Fatal("revoking one permission must preserve other grants")
+	}
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := Permissions(chatID); !slices.Equal(got, []Permission{"auth:report"}) {
+		t.Fatalf("reloaded permissions = %v", got)
+	}
+	members := Members()
+	if len(members) != 1 || members[0].ID != chatID || members[0].Role != RoleUser {
+		t.Fatalf("members = %#v", members)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("auth file mode = %o, want 600", got)
+	}
+}
+
+func TestLegacyRoleStoreRemainsCompatible(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	legacy := []byte(`{"members":[{"id":1001,"role":2},{"id":2002,"role":1}]}`)
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	if RoleOf(1001) != RoleOwner || RoleOf(2002) != RoleAdmin {
+		t.Fatalf("legacy roles were not restored: owner=%s admin=%s", RoleOf(1001), RoleOf(2002))
+	}
+	if !HasPermission(2002, "auth:aff") {
+		t.Fatal("legacy admin should inherit business permissions")
+	}
+}
+
+func TestPermissionValidationFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []Permission{"", "aff", "auth:", "AUTH AFF", "auth:aff:!"} {
+		if err := GrantPermissions(4004, value); err == nil {
+			t.Fatalf("GrantPermissions(%q) should fail", value)
+		}
+	}
+	if HasPermission(4004, "auth:aff") {
+		t.Fatal("invalid grants must not change authorization state")
+	}
+
+	invalidPath := filepath.Join(t.TempDir(), "invalid-auth.json")
+	invalid := []byte(`{"members":[{"id":5005,"role":99,"permissions":["auth:aff"]}]}`)
+	if err := os.WriteFile(invalidPath, invalid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(invalidPath); err == nil {
+		t.Fatal("invalid persisted role should prevent startup")
 	}
 }
