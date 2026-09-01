@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+// OIDCConfig is the ERP OpenID Connect relying-party configuration. An empty
+// issuer disables the integration; callers reject partially configured values.
+type OIDCConfig struct {
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	EncryptionKey string
+	Scopes        []string
+	StorePath     string
+	RedirectURL   string
+}
+
 // PluginsMode returns the plugin filter mode from PLUGINS_MODE:
 // "blacklist" (default; list = disabled) or "whitelist" (list = only enabled).
 func PluginsMode() string {
@@ -140,4 +152,27 @@ func PanelStorePath() string {
 		return p
 	}
 	return "panel.json"
+}
+
+// OIDC returns Magi's ERP OpenID Connect client configuration. The callback is
+// intentionally derived from the trusted public base URL instead of request
+// Host or forwarding headers.
+func OIDC() OIDCConfig {
+	scopes := strings.Fields(os.Getenv("MAGI_OIDC_SCOPES"))
+	if len(scopes) == 0 {
+		scopes = []string{"openid", "profile", "offline_access"}
+	}
+	storePath := strings.TrimSpace(os.Getenv("MAGI_OIDC_STORE"))
+	if storePath == "" {
+		storePath = "oidc.json"
+	}
+	return OIDCConfig{
+		Issuer:        strings.TrimSpace(os.Getenv("MAGI_OIDC_ISSUER")),
+		ClientID:      strings.TrimSpace(os.Getenv("MAGI_OIDC_CLIENT_ID")),
+		ClientSecret:  strings.TrimSpace(os.Getenv("MAGI_OIDC_CLIENT_SECRET")),
+		EncryptionKey: strings.TrimSpace(os.Getenv("MAGI_OIDC_ENCRYPTION_KEY")),
+		Scopes:        scopes,
+		StorePath:     storePath,
+		RedirectURL:   strings.TrimRight(PublicBaseURL(), "/") + "/auth/oidc/callback",
+	}
 }

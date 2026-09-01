@@ -4,7 +4,9 @@ go 1.26
 
 require (
 	github.com/bytedance/sonic v1.15.2
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/telebot.v3 v3.3.8
 )
 
@@ -12,6 +14,7 @@ require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect

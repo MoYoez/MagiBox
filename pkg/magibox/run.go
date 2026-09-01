@@ -19,6 +19,7 @@ import (
 	"github.com/moyoez/magibox/internal/kuma"
 	"github.com/moyoez/magibox/internal/playground"
 	_ "github.com/moyoez/magibox/internal/plugins"
+	"github.com/moyoez/magibox/internal/plugins/account"
 	"github.com/moyoez/magibox/internal/plugins/panel"
 	"github.com/moyoez/magibox/internal/uptime"
 	"github.com/moyoez/magibox/pkg/plugin"
@@ -46,6 +47,9 @@ func Run() error {
 	plugin.SyncProfile(b, config.BotName(), config.BotDescription(), config.BotAbout())
 	if err := auth.Init(config.AuthStorePath()); err != nil {
 		return fmt.Errorf("初始化权限: %w", err)
+	}
+	if err := account.Init(config.OIDC()); err != nil {
+		return fmt.Errorf("初始化 ERP OIDC 账户绑定: %w", err)
 	}
 	if err := playground.Init(config.PlaygroundStorePath()); err != nil {
 		return fmt.Errorf("初始化 playground: %w", err)
@@ -91,9 +95,17 @@ func Run() error {
 	}
 	mux.Handle("/", bundle.Handler())
 
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+	}
 	log.Printf("HTTP 服务监听 %s(base=%s)", addr, config.BundleBaseURL())
 	go func() {
-		if err := http.Serve(listener, mux); err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[http] 服务退出: %v", err)
 		}
 	}()

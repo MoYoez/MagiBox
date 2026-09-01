@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestRoleFlow(t *testing.T) {
@@ -65,6 +66,44 @@ func TestRoleFlow(t *testing.T) {
 	// Roles should have been persisted.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("应已持久化: %v", err)
+	}
+}
+
+func TestFederatedPermissionsAreExpiringAndSourceIsolated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	const chatID int64 = 6006
+	if err := GrantPermissions(chatID, "auth:manual"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceFederatedPermissions(
+		chatID, time.Now().Add(time.Hour), "AUTH:AFF",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := Permissions(chatID); !slices.Equal(got, []Permission{"auth:aff", "auth:manual"}) {
+		t.Fatalf("effective permissions = %v", got)
+	}
+	if err := RevokePermissions(chatID, "auth:manual"); err != nil {
+		t.Fatal(err)
+	}
+	if HasPermission(chatID, "auth:manual") || !HasPermission(chatID, "auth:aff") {
+		t.Fatal("manual revoke must not remove an unrelated federated grant")
+	}
+	ClearFederatedPermissions(chatID)
+	if HasPermission(chatID, "auth:aff") {
+		t.Fatal("clearing federated grants must remove their permissions")
+	}
+	if err := ReplaceFederatedPermissions(chatID, time.Now().Add(-time.Second), "auth:expired"); err != nil {
+		t.Fatal(err)
+	}
+	if HasPermission(chatID, "auth:expired") {
+		t.Fatal("expired federated grants must fail closed")
+	}
+	if err := ReplaceFederatedPermissions(-100, time.Now().Add(time.Hour), "auth:aff"); err == nil {
+		t.Fatal("group and invalid ids must not receive federated grants")
 	}
 }
 

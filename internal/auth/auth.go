@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bytedance/sonic"
 )
@@ -69,16 +70,23 @@ func ParseRole(s string) (Role, bool) {
 }
 
 type store struct {
-	mu          sync.RWMutex
-	path        string
-	roles       map[int64]Role // only roles > user are recorded; absent means user
-	permissions map[int64]map[Permission]struct{}
-	code        string // owner pairing code; empty means binding is closed
+	mu                   sync.RWMutex
+	path                 string
+	roles                map[int64]Role // only roles > user are recorded; absent means user
+	permissions          map[int64]map[Permission]struct{}
+	federatedPermissions map[int64]federatedGrant
+	code                 string // owner pairing code; empty means binding is closed
+}
+
+type federatedGrant struct {
+	permissions map[Permission]struct{}
+	expiresAt   time.Time
 }
 
 var def = &store{
-	roles:       map[int64]Role{},
-	permissions: map[int64]map[Permission]struct{}{},
+	roles:                map[int64]Role{},
+	permissions:          map[int64]map[Permission]struct{}{},
+	federatedPermissions: map[int64]federatedGrant{},
 }
 
 // Init loads persisted roles; if there is no owner yet, it generates a
@@ -90,6 +98,7 @@ func Init(path string) error {
 	def.path = path
 	def.roles = map[int64]Role{}
 	def.permissions = map[int64]map[Permission]struct{}{}
+	def.federatedPermissions = map[int64]federatedGrant{}
 	def.code = ""
 	if err := def.load(); err != nil {
 		return err
@@ -146,20 +155,74 @@ func HasPermission(chatID int64, value Permission) bool {
 	if def.roles[chatID] >= RoleAdmin {
 		return true
 	}
-	_, ok = def.permissions[chatID][permission]
+	if _, ok = def.permissions[chatID][permission]; ok {
+		return true
+	}
+	grant, ok := def.federatedPermissions[chatID]
+	if !ok || !time.Now().Before(grant.expiresAt) {
+		return false
+	}
+	_, ok = grant.permissions[permission]
 	return ok
 }
 
-// Permissions returns the explicitly granted permissions for chatID.
+// Permissions returns the effective explicit permissions for chatID. It is the
+// union of durable owner-managed grants and unexpired federated grants.
 func Permissions(chatID int64) []Permission {
 	def.mu.RLock()
 	defer def.mu.RUnlock()
 	permissions := make([]Permission, 0, len(def.permissions[chatID]))
+	seen := make(map[Permission]struct{}, len(def.permissions[chatID]))
 	for permission := range def.permissions[chatID] {
+		seen[permission] = struct{}{}
 		permissions = append(permissions, permission)
+	}
+	if grant, ok := def.federatedPermissions[chatID]; ok && time.Now().Before(grant.expiresAt) {
+		for permission := range grant.permissions {
+			if _, exists := seen[permission]; exists {
+				continue
+			}
+			permissions = append(permissions, permission)
+		}
 	}
 	sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
 	return permissions
+}
+
+// ReplaceFederatedPermissions replaces the temporary permissions issued by an
+// external identity provider. These grants are memory-only: their authoritative
+// copy belongs to that provider's encrypted binding store and is restored after
+// startup. Passing no permissions, or a non-future expiry, clears the grant.
+func ReplaceFederatedPermissions(chatID int64, expiresAt time.Time, values ...Permission) error {
+	if chatID <= 0 {
+		return fmt.Errorf("auth: federated user id must be positive")
+	}
+	permissions, err := normalizedPermissionsIfPresent(values)
+	if err != nil {
+		return err
+	}
+	def.mu.Lock()
+	defer def.mu.Unlock()
+	if len(permissions) == 0 || !time.Now().Before(expiresAt) {
+		delete(def.federatedPermissions, chatID)
+		return nil
+	}
+	grant := federatedGrant{
+		permissions: make(map[Permission]struct{}, len(permissions)),
+		expiresAt:   expiresAt,
+	}
+	for _, permission := range permissions {
+		grant.permissions[permission] = struct{}{}
+	}
+	def.federatedPermissions[chatID] = grant
+	return nil
+}
+
+// ClearFederatedPermissions removes only temporary identity-provider grants.
+func ClearFederatedPermissions(chatID int64) {
+	def.mu.Lock()
+	defer def.mu.Unlock()
+	delete(def.federatedPermissions, chatID)
 }
 
 // SetRole sets the role of chatID and persists it. RoleUser removes only the
@@ -268,18 +331,33 @@ type Member struct {
 func Members() []Member {
 	def.mu.RLock()
 	defer def.mu.RUnlock()
-	ids := make(map[int64]struct{}, len(def.roles)+len(def.permissions))
+	now := time.Now()
+	ids := make(map[int64]struct{}, len(def.roles)+len(def.permissions)+len(def.federatedPermissions))
 	for id := range def.roles {
 		ids[id] = struct{}{}
 	}
 	for id := range def.permissions {
 		ids[id] = struct{}{}
 	}
+	for id, grant := range def.federatedPermissions {
+		if now.Before(grant.expiresAt) {
+			ids[id] = struct{}{}
+		}
+	}
 	ms := make([]Member, 0, len(ids))
 	for id := range ids {
 		permissions := make([]Permission, 0, len(def.permissions[id]))
+		seen := make(map[Permission]struct{}, len(def.permissions[id]))
 		for permission := range def.permissions[id] {
+			seen[permission] = struct{}{}
 			permissions = append(permissions, permission)
+		}
+		if grant, ok := def.federatedPermissions[id]; ok && now.Before(grant.expiresAt) {
+			for permission := range grant.permissions {
+				if _, exists := seen[permission]; !exists {
+					permissions = append(permissions, permission)
+				}
+			}
 		}
 		sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
 		ms = append(ms, Member{ID: id, Role: def.roles[id], Permissions: permissions})

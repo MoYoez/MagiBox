@@ -4,6 +4,7 @@
 package plugins
 
 import (
+	_ "github.com/moyoez/magibox/internal/plugins/account"
 	_ "github.com/moyoez/magibox/internal/plugins/bind"
 	_ "github.com/moyoez/magibox/internal/plugins/bundle"
 	_ "github.com/moyoez/magibox/internal/plugins/cf"
