@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,7 +141,7 @@ func handleAccount(c tele.Context) error {
 	}
 	switch subcommand {
 	case "bind":
-		bindingURL, err := current.issueBindingURL(c.Sender().ID)
+		bindingURL, err := current.issueBindingURL(telegramAccountFromUser(c.Sender()))
 		if err != nil {
 			return c.Send("生成绑定链接失败，请稍后再试")
 		}
@@ -229,12 +230,12 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ticket := r.URL.Query().Get("ticket")
 	if r.URL.Query().Get("confirm") != "1" {
-		telegramID, err := current.previewTicket(ticket)
+		account, err := current.previewTicket(ticket)
 		if err != nil {
 			writePage(w, http.StatusBadRequest, "绑定链接无效", "链接已使用或已过期，请回到 Telegram 重新执行 /account bind。")
 			return
 		}
-		writeConfirmPage(w, ticket, telegramID)
+		writeConfirmPage(w, ticket, account)
 		return
 	}
 	redirect, state, err := current.begin(ticket)
@@ -320,23 +321,85 @@ func secureHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
 }
 
+func telegramAccountFromUser(user *tele.User) telegramAccount {
+	if user == nil {
+		return telegramAccount{}
+	}
+	name := strings.TrimSpace(user.FirstName)
+	if last := strings.TrimSpace(user.LastName); last != "" {
+		if name == "" {
+			name = last
+		} else {
+			name += " " + last
+		}
+	}
+	return telegramAccount{ID: user.ID, Name: name, Username: user.Username}
+}
+
 func writePage(w http.ResponseWriter, status int, title, message string) {
-	writeHTML(w, status, html.EscapeString(title), "<p>"+html.EscapeString(message)+"</p>")
+	kind := "err"
+	if status < 400 {
+		kind = "ok"
+	}
+	writeHTML(w, status, kind, html.EscapeString(title), "<p>"+html.EscapeString(message)+"</p>", "", "")
 }
 
-func writeConfirmPage(w http.ResponseWriter, ticket string, telegramID int64) {
+func writeConfirmPage(w http.ResponseWriter, ticket string, account telegramAccount) {
 	confirm := "/auth/oidc/start?ticket=" + url.QueryEscape(ticket) + "&confirm=1"
-	body := fmt.Sprintf(
-		"<p>即将把 ERP 账户绑定到 Telegram 用户 %d。若这不是你本人，请关闭此页面，不要继续。</p><p><a href=\"%s\">确认并前往 ERP 登录</a></p>",
-		telegramID, html.EscapeString(confirm),
-	)
-	writeHTML(w, http.StatusOK, "确认绑定 ERP 账户", body)
+	var pad strings.Builder
+	pad.WriteString(`<div class="pad"><div class="k">TELEGRAM</div>`)
+	if account.Name != "" {
+		pad.WriteString(`<div class="name">` + html.EscapeString(account.Name) + `</div>`)
+	}
+	var meta []string
+	if account.Username != "" {
+		meta = append(meta, "@"+account.Username)
+	}
+	if account.ID > 0 {
+		meta = append(meta, strconv.FormatInt(account.ID, 10))
+	}
+	if len(meta) > 0 {
+		pad.WriteString(`<div class="meta">` + html.EscapeString(strings.Join(meta, " · ")) + `</div>`)
+	}
+	pad.WriteString(`</div>`)
+	body := "<p>即将把 ERP 账户绑定到这个 Telegram。</p>" + pad.String() +
+		"<p>若这不是你本人，请直接关闭此页面，不要继续。</p>"
+	writeHTML(w, http.StatusOK, "ask", "确认绑定 ERP 账户", body, html.EscapeString(confirm), "确认并前往 ERP 登录")
 }
 
-func writeHTML(w http.ResponseWriter, status int, title, body string) {
+func writeHTML(w http.ResponseWriter, status int, kind, title, body, actionHref, actionLabel string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>%s</title><style>body{font-family:system-ui,sans-serif;max-width:620px;margin:12vh auto;padding:24px;color:#202124}main{border:1px solid #ddd;border-radius:16px;padding:28px}h1{font-size:24px}p{line-height:1.7;color:#5f6368}a{color:#1a73e8}</style><main><h1>%s</h1>%s</main></html>`, title, title, body)
+	action := ""
+	if actionHref != "" && actionLabel != "" {
+		action = `<p class="actions"><a class="action" href="` + actionHref + `">` + html.EscapeString(actionLabel) + `</a></p>`
+	}
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%s</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#fff;color:#343a46;font-family:ui-sans-serif,system-ui,"PingFang SC","Noto Sans SC",sans-serif}
+main{width:min(36rem,100%%);margin:0 auto;padding:56px 24px 80px}
+.voice{margin:0 0 18px;font-size:15px;font-style:italic;color:#78808c}
+h1{margin:0 0 16px;font-size:1.75rem;font-weight:650;letter-spacing:-.02em;line-height:1.25;color:#343a46}
+p{margin:0 0 14px;font-size:15px;line-height:1.55;color:#4a5160}
+.pad{display:inline-block;min-width:12rem;margin:4px 0 18px;padding:14px 16px;background:#f6f7f9;border-radius:18px}
+.pad .k{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;font-size:11px;letter-spacing:.04em;color:#98a1ae}
+.pad .name{margin-top:6px;font-size:18px;font-weight:650;color:#343a46}
+.pad .meta{margin-top:4px;font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;font-size:13px;color:#4a5160}
+.actions{margin:28px 0 0}
+.action{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;border-radius:18px;background:#f6f7f9;color:#343a46;text-decoration:none;font-weight:600}
+</style>
+<main class="%s">
+<p class="voice">Mooding~</p>
+<h1>%s</h1>
+%s%s
+</main>
+</html>`, title, kind, title, body, action)
 }
 
 func init() { plugin.Register(Plugin{}) }

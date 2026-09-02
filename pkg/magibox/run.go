@@ -16,12 +16,9 @@ import (
 	"github.com/moyoez/magibox/internal/bundle"
 	cloudflare "github.com/moyoez/magibox/internal/cloudflare"
 	"github.com/moyoez/magibox/internal/config"
-	"github.com/moyoez/magibox/internal/kuma"
 	"github.com/moyoez/magibox/internal/playground"
 	_ "github.com/moyoez/magibox/internal/plugins"
 	"github.com/moyoez/magibox/internal/plugins/account"
-	"github.com/moyoez/magibox/internal/plugins/panel"
-	"github.com/moyoez/magibox/internal/uptime"
 	"github.com/moyoez/magibox/pkg/plugin"
 )
 
@@ -60,24 +57,15 @@ func Run() error {
 	if err := bundle.Init(config.BundleStorePath(), config.BundleMediaDir(), config.BundleBaseURL()); err != nil {
 		return fmt.Errorf("初始化 bundle: %w", err)
 	}
-	if err := uptime.Init(config.UptimeStorePath()); err != nil {
-		return fmt.Errorf("初始化 uptime: %w", err)
-	}
 	if err := cloudflare.Init(config.CloudflareStorePath()); err != nil {
 		return fmt.Errorf("初始化 cloudflare: %w", err)
-	}
-	if err := panel.Init(config.PanelStorePath()); err != nil {
-		return fmt.Errorf("初始化 panel: %w", err)
-	}
-	if err := kuma.Init(config.KumaStorePath()); err != nil {
-		return fmt.Errorf("初始化 kuma: %w", err)
 	}
 
 	// Filter is applied before building HTTP routes so plugin.HTTPRoutes
 	// honors disabled plugins.
 	plugin.SetFilter(config.PluginsMode(), config.PluginsList())
 
-	// Shared HTTP server: plugin routes (e.g. inbound webhooks) mount first,
+	// Shared HTTP server: plugin routes mount first,
 	// then bundle handles everything else (/b/, /m/). The listener is opened
 	// and serving before plugin.Setup so a port conflict surfaces first and the
 	// listener is torn down if Setup fails (see run_test.go).

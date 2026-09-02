@@ -390,7 +390,6 @@ func (c *erpIdentityClient) readJSON(req *http.Request, target any) error {
 		return fmt.Errorf("provider returned a non-JSON response")
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

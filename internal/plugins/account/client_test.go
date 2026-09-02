@@ -133,7 +133,9 @@ func (f *oidcProviderFixture) serveHTTP(w http.ResponseWriter, r *http.Request) 
 			"iss": f.issuer, "scope": "openid profile offline_access", "token_type": "Bearer",
 			"exp": time.Now().Add(10 * time.Minute).Unix(), "iat": time.Now().Unix(), "auth_time": time.Now().Unix(),
 			"erp_access": map[string]any{
-				"version": 1, "allowed": allowed, "roles": []string{"affiliate"},
+				"version": 1, "mode": "identity_only", "allowed": allowed,
+				"project_id": nil, "department_id": nil, "evaluated_at": time.Now().Unix(),
+				"roles":       []string{"affiliate"},
 				"permissions": []string{"magi:auth:aff", "other:ignored"},
 			},
 		})

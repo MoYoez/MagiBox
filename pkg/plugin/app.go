@@ -25,7 +25,7 @@ type Wirer interface {
 
 // Route mounts an HTTP handler at a net/http ServeMux pattern on the shared
 // server (the same one that serves bundle). A trailing slash makes it a
-// subtree match, e.g. Pattern "/hook/uptime/" catches "/hook/uptime/<token>".
+// subtree match, e.g. Pattern "/auth/oidc/" catches "/auth/oidc/callback".
 type Route struct {
 	Pattern string
 	Handler http.Handler

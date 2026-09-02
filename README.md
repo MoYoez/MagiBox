@@ -42,10 +42,7 @@ docker run -d --name magibox \
 | `/pg_run` `/pg_sched` `/pg_new` … | `/pg` 子命令的独立版本,参数相同,输 `/` 有补全 | admin |
 | `/<组名> [键=值 …]` | playground 分组直达命令,等价 `/pg run <组名>`;新建分组自动注册,删除自动移除(组名需为 a-z0-9_) | admin |
 | `/bundle start/end/status/cancel` | 会话打包 | 公开 |
-| `/uptime` | Uptime Kuma 回调监听:生成回调地址、把回调 JSON 解析成文案推给指定群,用法见 `/uptime help` | admin |
-| `/cf` | Cloudflare 多凭据 + Worker 自定义域名管理 + 域名记录库(大类/小类/状态)+ 掉线切换(联动 Kuma),用法见 `/cf help` | admin |
-| `/kuma` | Uptime Kuma REST 包装器管理:绑定地址/Key,给指定域名或整个大类批量建监控,用法见 `/kuma help` | admin |
-| `/panel` | 生成后台面板的一次性登录码:`/panel new|list|revoke` | admin |
+| `/cf` | Cloudflare 多凭据 + Worker 自定义域名管理 + 域名记录库,用法见 `/cf help` | admin |
 | `/help` | 自动生成的命令列表 | 公开 |
 
 角色与业务权限相互独立。普通用户可以同时叠加多个形如 `auth:aff` 的权限；
@@ -64,17 +61,7 @@ docker run -d --name magibox \
 
 **会话打包(`/bundle`)** — `start` 到 `end` 之间的消息会被打包成一个随机链接,无法被猜测或枚举。浏览器打开是白底圆角的聊天页面;curl 或加 `?format=json` 拿到结构化 JSON,可以直接交给 AI 处理。图片、sticker 和 20MB 以内的视频会下载并内嵌展示,文件类消息不收。
 
-**Uptime Kuma 回调(`/uptime`)** — 与 `/pg` 的主动巡检相反,这是被动接收:`/uptime new <名字>` 建一个监听,返回一条不可枚举的回调地址(`<PUBLIC_BASE_URL>/hook/uptime/<token>`,和 bundle 共用同一个 HTTP 服务),把它填到 Uptime Kuma 的「Webhook」通知里即可;`/uptime url <名字>` 单独再打印一次地址。`/uptime target <名字> here` 把通知目标绑到当前会话(群里就发群 id),回调到达时按配置解析后推过去。文案两种写法:`/uptime fields <名字> ipgroup,isbanned` 把回调 JSON 里的这些字段(支持 `monitor.name` 点路径)渲染成「字段: 值」逐行输出;`/uptime template <名字> <文案>` 用 `{a.b}` 占位自定义整段文案。带 `heartbeat.status` 的载荷(Kuma 默认格式)会自动在标题标出上线/掉线。`/uptime test <名字> [JSON]` 用示例或自带 JSON 演练一次。
-
-**Cloudflare 域名管理(`/cf`)** — 面向多账号,按「有的域名」操作而不锁定某个 zone。`/cf cred add <名> <account_id> <api_token>` 存多个凭据(用 scoped API Token,需 Workers Scripts 编辑 + Zone/DNS 权限;token 显示时打码)。`/cf worker add <worker> <凭据> [大类]` 把 Worker 登记到某个凭据下,并可绑一个「大类」;`/cf worker domains <worker>` 直接从 Cloudflare 查这个 worker 现有绑定的域名(实时,不是本地记录,并标注每个域名在记录库里的状态或「未入库」)。`/cf worker import <worker>`(面板 Worker 页也有「导入现有域名」按钮)则把这些实时绑定的域名一键纳入记录库:自动归到该 worker 的大类、标记「已使用」并挂到该 worker,已存在的记录只更新状态不动其它字段——省去手工录入。域名记录库分三层:大类(哪个项目)、小类(可选子分组)、状态(未使用/已使用/被ban);`/cf domain add <大类> <域名[,域名...]> [小类]` 批量录入。录入后可以随时改分类:`/cf domain set <域名> category <大类>` / `sub <小类>`。每条域名记录还能记生命周期字段:`/cf domain set <域名> <字段> <值>`,字段有 `purchased`(购买日期)、`usage`(准备用在哪里)、`dns`(DNS 是什么)、`ready`(是否就绪 yes/no)、`changed`(更换时间);`/cf show <域名>` 查看全部字段,`/cf domain list` 会给就绪的域名标 ✅。绑定成功时会自动记一次「更换时间」。核心操作 `/cf bind <worker> [域名] [force]` 走 Worker Custom Domains:不给域名时自动从该 worker 大类里取一个「未使用」的域名,自动从域名解析出 zone 并绑定,成功后把域名标记「已使用」;如果域名已绑到别的 worker 会先提示,加 `force` 才强制替换。`/cf unbind <域名>` 解绑并回到「未使用」,`/cf show <worker|域名>` 看当前记录。凭据/Worker/域名都持久化在 `cloudflare.json`(0600)。
-
-**掉线自动/人工切换(`/cf failover`)** — 联动 Uptime Kuma:某个绑在 worker 上的域名连续掉线时,自动或经人工确认从该 worker 自己的大类池里换一个「未使用」域名顶上,坏域名标记 `ban`(不再进入自动挑选池)。`/cf failover add <名> <worker> [阈值] [auto|manual]`(默认阈值 2、manual)创建规则并返回一个专属回调地址,把它填进 Kuma 对应 monitor 的 Webhook 通知即可;Kuma monitor 的名字就是域名(`/kuma add` 建的),所以回调里的 `monitor.name` 直接定位坏域名,无需额外映射。`/cf failover target <名> <chat_id|here>` 设通知目标。达到阈值时:`auto` 立即切换并推送结果;`manual` 只推告警,你发 `/cf failover apply <名>` 才切。收到该域名的 up 回调会清零连续计数。`/cf failover mode <名> <auto|manual>` 改模式,`/cf failover test <名> <域名>` 对给定域名跑一次真实切换演练,`/cf failover list`/`show`/`del` 管理规则。规则持久化在 `cloudflare.json`,连续掉线计数与待确认状态是进程内易失状态(重启归零)。因为跳转路由 worker 运行时会去查终点 worker 当前绑定的域名,切换终点域名后路由自动跟随,无需改任何 Worker 代码;若要对路由入口域名也做切换,再建一条指向该 worker 的规则即可。
-
-**一键上线(`/cf provision`)** — 把「从池里挑一个域名 → 绑到 worker → 在 Kuma 建监控 → 挂上掉线切换 webhook」这一整串手工步骤合成一条命令,做到「加一个域名就自动纳入监控与切换」。前置一次性配置:该 worker 已建 failover 规则,并用 `/cf failover kuma <规则> <kuma凭据>` 把规则关联到一个 Kuma 凭据(规则本身携带回调 token,所以 webhook 地址由规则决定)。之后 `/cf provision <worker> [域名]`:不给域名就从该 worker 大类里取一个「未使用」的;给了就先校验它在 CF 里确有对应 zone(不可绑定则干净中止、不动任何东西)。随后依次:①绑定 Custom Domain 并标「已使用」②在 Kuma 建一个以域名为名的 HTTP 监控(同名监控已存在则复用,可接管你手动建的)③建/复用该规则专属的 webhook 通知(名为 `magibox-<规则名>`)④把通知挂到监控上。绑定先行,所以即便 Kuma 环节出错域名也已上线(只是未挂监控),重跑 provision 会幂等地补齐。每一步的结果都会回报。
-
-**Uptime Kuma 建监控(`/kuma`)** — 与 `/uptime`(接收 Kuma 回调)相反,这是主动调 Kuma 建监控。vanilla Kuma 没有建监控的 REST 接口,所以对接 [keithah/uptime-kuma-rest-api](https://github.com/keithah/uptime-kuma-rest-api) 这类包装器:`/kuma cred add <名> <base_url> [api_key]` 绑定包装器地址(API Key 仅在你给包装器加了鉴权时需要,以 Bearer 发送,不加就留空;显示打码)。`/kuma add <名> <域名>` 给指定域名建一个 `https://<域名>` 的 HTTP 监控;`/kuma add <名> all [大类]` 则把 `/cf` 记录库里的域名批量建监控(全局或按大类,自动跳过「被ban」)。`/kuma list <名>` 看现有监控,`/kuma del <名> <monitor_id>` 删。凭据存在 `kuma.json`(0600)。
-
-**后台面板(`panel`)** — 一个干净的网页后台,和 bundle 共用同一个 HTTP 服务,地址 `<PUBLIC_BASE_URL>/panel/`。**一次性授权码登录**:admin 在 bot 里 `/panel new` 生成一个一次性登录码,发给需要的人;在登录页输入后签发 HMAC 签名的 HttpOnly cookie,**有效期 30 天**(反代跑 https 时自动带 Secure)。码用一次即失效,`/panel list` 看待用码,`/panel revoke <码>` 撤销。面板覆盖前面几个功能:Cloudflare 域名记录(录入、改分类/状态/生命周期字段、绑定/解绑 Worker Custom Domain)、掉线切换规则(新建/删除、改模式与通知目标、复制回调地址、人工确认更换)、Uptime Kuma 监控(建/删/查)、以及只读查看 Worker、凭据、回调监听。带密钥的凭据/Worker 创建仍留在 bot(`/cf cred`、`/kuma cred`)。界面是密集型仪表盘风格,自适应桌面/移动,支持浅色/深色。签名密钥与待用码存在 `panel.json`(0600)。想彻底关掉面板就把 `panel` 插件加进黑名单。
+**Cloudflare 域名管理(`/cf`)** — 面向多账号,按「有的域名」操作而不锁定某个 zone。`/cf cred add <名> <account_id> <api_token>` 存多个凭据(用 scoped API Token,需 Workers Scripts 编辑 + Zone/DNS 权限;token 显示时打码)。`/cf worker add <worker> <凭据> [大类]` 把 Worker 登记到某个凭据下,并可绑一个「大类」;`/cf worker domains <worker>` 直接从 Cloudflare 查这个 worker 现有绑定的域名(实时,不是本地记录,并标注每个域名在记录库里的状态或「未入库」)。`/cf worker import <worker>` 则把这些实时绑定的域名一键纳入记录库:自动归到该 worker 的大类、标记「已使用」并挂到该 worker,已存在的记录只更新状态不动其它字段——省去手工录入。域名记录库分三层:大类(哪个项目)、小类(可选子分组)、状态(未使用/已使用/被ban);`/cf domain add <大类> <域名[,域名...]> [小类]` 批量录入。录入后可以随时改分类:`/cf domain set <域名> category <大类>` / `sub <小类>`。每条域名记录还能记生命周期字段:`/cf domain set <域名> <字段> <值>`,字段有 `purchased`(购买日期)、`usage`(准备用在哪里)、`dns`(DNS 是什么)、`ready`(是否就绪 yes/no)、`changed`(更换时间);`/cf show <域名>` 查看全部字段,`/cf domain list` 会给就绪的域名标 ✅。绑定成功时会自动记一次「更换时间」。核心操作 `/cf bind <worker> [域名] [force]` 走 Worker Custom Domains:不给域名时自动从该 worker 大类里取一个「未使用」的域名,自动从域名解析出 zone 并绑定,成功后把域名标记「已使用」;如果域名已绑到别的 worker 会先提示,加 `force` 才强制替换。`/cf unbind <域名>` 解绑并回到「未使用」,`/cf show <worker|域名>` 看当前记录。凭据/Worker/域名都持久化在 `cloudflare.json`(0600)。
 
 **在群里用** — 群里发 `/whoami` 拿到群的 chat id(负数),`/promote` 这个 id 之后,巡检告警就会推到群里。如果还想收集群里的普通消息(会话打包),需要在 @BotFather 里关掉 bot 的隐私模式。
 
@@ -87,9 +74,9 @@ docker run -d --name magibox \
 | `BUNDLE_ADDR` | `:8099` | 共享 HTTP 服务监听地址(bundle 与插件回调路由都挂在这里) |
 | `BUNDLE_BASE_URL` | `http://localhost:8099` | 生成链接时的前缀 |
 | `BUNDLE_MEDIA_DIR` | `bundle-media` | 媒体文件目录 |
-| `PUBLIC_BASE_URL` | (空=同 `BUNDLE_BASE_URL`) | 插件 HTTP 路由(如 `/uptime` 回调)对外前缀,和 bundle 同一个服务;一般不用单独设 |
+| `PUBLIC_BASE_URL` | (空=同 `BUNDLE_BASE_URL`) | 对外 HTTPS 前缀,OIDC callback 为 `<PUBLIC_BASE_URL>/auth/oidc/callback` |
 | `PLUGINS_MODE` / `PLUGINS_LIST` | `blacklist` / 空 | 插件开关:blacklist=列表里的禁用,whitelist=只启用列表里的;逗号分隔,如 `PLUGINS_LIST=echo,bundle` |
-| `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` / `UPTIME_STORE` / `CLOUDFLARE_STORE` / `KUMA_STORE` / `PANEL_STORE` | `*.json` | 各持久化文件路径 |
+| `AUTH_STORE` / `PLAYGROUND_STORE` / `VARS_STORE` / `BUNDLE_STORE` / `CLOUDFLARE_STORE` | `*.json` | 各持久化文件路径 |
 
 监听地址和链接前缀是分开的:套反向代理时,可以只监听 `127.0.0.1:8099`,把 `BUNDLE_BASE_URL` 设成对外的 https 域名。
 

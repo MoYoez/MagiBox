@@ -8,8 +8,7 @@ import (
 )
 
 // SetDomainField sets one field on a domain record by name (English or Chinese
-// alias). Shared by the /cf domain set command and the panel so both validate
-// and behave identically. Supported fields: category, sub, status, purchased,
+// alias). Shared by the /cf domain set command. Supported fields: category, sub, status, purchased,
 // usage, dns, ready, changed.
 func SetDomainField(domain, field, value string) error {
 	return MutateDomain(domain, func(d *Domain) error {
@@ -87,7 +86,7 @@ type BindResult struct {
 // re-point a hostname bound to another worker unless force is set (returning a
 // *ConflictError), attaches, then marks the record used and stamps ChangedAt.
 //
-// Shared by the /cf bind command and the panel so both behave identically.
+// Used by the /cf bind command.
 func BindDomain(ctx context.Context, workerName, domain string, force bool) (*BindResult, error) {
 	w, ok := GetWorker(workerName)
 	if !ok {

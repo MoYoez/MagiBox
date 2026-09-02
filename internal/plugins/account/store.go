@@ -48,10 +48,18 @@ type binding struct {
 	UpdatedAt        int64             `json:"updated_at"`
 }
 
+type telegramAccount struct {
+	ID       int64
+	Name     string
+	Username string
+}
+
 type bindTicket struct {
-	Digest     string `json:"digest"`
-	TelegramID int64  `json:"telegram_id"`
-	ExpiresAt  int64  `json:"expires_at"`
+	Digest      string `json:"digest"`
+	TelegramID  int64  `json:"telegram_id"`
+	DisplayName string `json:"display_name,omitempty"`
+	Username    string `json:"username,omitempty"`
+	ExpiresAt   int64  `json:"expires_at"`
 }
 
 type loginTransaction struct {
@@ -118,9 +126,10 @@ func newBindingStore(path, issuer, clientID string, tokenCipher *tokenCipher, no
 	return s, nil
 }
 
-func (s *bindingStore) issueTicket(telegramID int64, now time.Time) (string, error) {
-	if telegramID <= 0 {
-		return "", fmt.Errorf("oidc: Telegram user id must be positive")
+func (s *bindingStore) issueTicket(account telegramAccount, now time.Time) (string, error) {
+	account, err := normalizeTelegramAccount(account)
+	if err != nil {
+		return "", err
 	}
 	raw, err := randomToken(32)
 	if err != nil {
@@ -131,12 +140,16 @@ func (s *bindingStore) issueTicket(telegramID int64, now time.Time) (string, err
 	defer s.mu.Unlock()
 	s.cleanup(now)
 	for existingDigest, ticket := range s.tickets {
-		if ticket.TelegramID == telegramID {
+		if ticket.TelegramID == account.ID {
 			delete(s.tickets, existingDigest)
 		}
 	}
 	s.tickets[digest] = bindTicket{
-		Digest: digest, TelegramID: telegramID, ExpiresAt: now.Add(bindTicketTTL).Unix(),
+		Digest:      digest,
+		TelegramID:  account.ID,
+		DisplayName: account.Name,
+		Username:    account.Username,
+		ExpiresAt:   now.Add(bindTicketTTL).Unix(),
 	}
 	if err := s.save(); err != nil {
 		delete(s.tickets, digest)
@@ -145,16 +158,20 @@ func (s *bindingStore) issueTicket(telegramID int64, now time.Time) (string, err
 	return raw, nil
 }
 
-func (s *bindingStore) lookupTicket(raw string, now time.Time) (int64, error) {
+func (s *bindingStore) lookupTicket(raw string, now time.Time) (telegramAccount, error) {
 	digest := tokenDigest(raw)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanup(now)
 	ticket, ok := s.tickets[digest]
 	if !ok || ticket.ExpiresAt <= now.Unix() {
-		return 0, errTicketInvalid
+		return telegramAccount{}, errTicketInvalid
 	}
-	return ticket.TelegramID, nil
+	return telegramAccount{
+		ID:       ticket.TelegramID,
+		Name:     ticket.DisplayName,
+		Username: ticket.Username,
+	}, nil
 }
 
 func (s *bindingStore) consumeTicket(raw string, now time.Time) (int64, error) {
@@ -172,6 +189,15 @@ func (s *bindingStore) consumeTicket(raw string, now time.Time) (int64, error) {
 		return 0, err
 	}
 	return ticket.TelegramID, nil
+}
+
+func normalizeTelegramAccount(account telegramAccount) (telegramAccount, error) {
+	if account.ID <= 0 {
+		return telegramAccount{}, fmt.Errorf("oidc: Telegram user id must be positive")
+	}
+	account.Name = boundedText(account.Name, 64)
+	account.Username = strings.TrimPrefix(boundedText(account.Username, 32), "@")
+	return account, nil
 }
 
 func (s *bindingStore) beginTransaction(telegramID int64, nonce, verifier string, now time.Time) (string, error) {

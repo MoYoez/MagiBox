@@ -28,7 +28,7 @@ func setupHTTPService(t *testing.T) (*bindingStore, time.Time) {
 
 func TestStartHandlerRequiresConfirmationBeforeRedirect(t *testing.T) {
 	store, now := setupHTTPService(t)
-	ticket, err := store.issueTicket(12345, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +63,27 @@ func TestStartHandlerRequiresConfirmationBeforeRedirect(t *testing.T) {
 	}
 }
 
+func TestStartHandlerShowsTelegramName(t *testing.T) {
+	store, now := setupHTTPService(t)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345, Name: "小林", Username: "alice01"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/start?ticket="+ticket, nil)
+	startHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "小林") || !strings.Contains(body, "@alice01") || !strings.Contains(body, "12345") {
+		t.Fatalf("confirmation page = %s", body)
+	}
+}
+
 func TestStartHandlerRejectsReplayAndWrongMethod(t *testing.T) {
 	store, now := setupHTTPService(t)
-	ticket, err := store.issueTicket(12345, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +127,7 @@ func TestCallbackHandlerRequiresMatchingStateCookie(t *testing.T) {
 
 func TestCallbackHandlerBindsAfterSuccessfulExchange(t *testing.T) {
 	store, now := setupHTTPService(t)
-	ticket, err := store.issueTicket(12345, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +173,36 @@ func TestWritePageEscapesHTML(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Fatalf("expected escaped title: %s", body)
+	}
+}
+
+func TestBindPagesRenderMagiBrand(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writePage(rec, http.StatusOK, "ERP 账户绑定成功", "现在可以关闭页面并回到 Telegram。")
+	body := rec.Body.String()
+	if !strings.Contains(body, "Mooding~") || !strings.Contains(body, `class="ok"`) {
+		t.Fatalf("success page = %s", body)
+	}
+	rec = httptest.NewRecorder()
+	writeConfirmPage(rec, "ticket-value", telegramAccount{ID: 12345, Name: "小林", Username: "alice01"})
+	body = rec.Body.String()
+	if !strings.Contains(body, "Mooding~") || !strings.Contains(body, "confirm=1") ||
+		!strings.Contains(body, "确认并前往 ERP 登录") || !strings.Contains(body, "12345") ||
+		!strings.Contains(body, "小林") || !strings.Contains(body, "@alice01") {
+		t.Fatalf("confirm page = %s", body)
+	}
+}
+
+func TestWriteConfirmPageEscapesTelegramName(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeConfirmPage(rec, "ticket-value", telegramAccount{
+		ID: 12345, Name: `<img src=x>`, Username: `alice"><script>`,
+	})
+	body := rec.Body.String()
+	if strings.Contains(body, "<img src=x>") || strings.Contains(body, `<script>`) {
+		t.Fatalf("unescaped Telegram fields: %s", body)
+	}
+	if !strings.Contains(body, "&lt;img src=x&gt;") {
+		t.Fatalf("expected escaped name: %s", body)
 	}
 }

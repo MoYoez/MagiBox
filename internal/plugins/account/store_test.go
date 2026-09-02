@@ -35,7 +35,7 @@ func testStore(t *testing.T, now time.Time) (*bindingStore, string) {
 func TestBindingStoreTicketsAndTransactionsAreSingleUse(t *testing.T) {
 	now := time.Now().UTC()
 	store, _ := testStore(t, now)
-	ticket, err := store.issueTicket(12345, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,14 +184,35 @@ func TestBindingStoreRefreshesPermissionsOnFixedSchedule(t *testing.T) {
 	}
 }
 
-func TestBindingStoreIssueTicketInvalidatesPreviousTicket(t *testing.T) {
+func TestBindingStoreLookupTicketKeepsDisplayName(t *testing.T) {
 	now := time.Now().UTC()
-	store, _ := testStore(t, now)
-	first, err := store.issueTicket(12345, now)
+	store, path := testStore(t, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345, Name: "小林", Username: "alice01"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.issueTicket(12345, now)
+	account, err := store.lookupTicket(ticket, now)
+	if err != nil || account.ID != 12345 || account.Name != "小林" || account.Username != "alice01" {
+		t.Fatalf("lookup = %#v, %v", account, err)
+	}
+	reloaded, err := newBindingStore(path, store.issuer, store.clientID, store.cipher, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err = reloaded.lookupTicket(ticket, now)
+	if err != nil || account.Name != "小林" || account.Username != "alice01" {
+		t.Fatalf("reloaded lookup = %#v, %v", account, err)
+	}
+}
+
+func TestBindingStoreIssueTicketInvalidatesPreviousTicket(t *testing.T) {
+	now := time.Now().UTC()
+	store, _ := testStore(t, now)
+	first, err := store.issueTicket(telegramAccount{ID: 12345}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +228,7 @@ func TestBindingStoreIssueTicketInvalidatesPreviousTicket(t *testing.T) {
 func TestBindingStoreRestoresTicketWhenSaveFails(t *testing.T) {
 	now := time.Now().UTC()
 	store, _ := testStore(t, now)
-	ticket, err := store.issueTicket(12345, now)
+	ticket, err := store.issueTicket(telegramAccount{ID: 12345}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

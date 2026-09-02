@@ -15,12 +15,10 @@ func freshStore(t *testing.T) {
 func freshStoreAt(t *testing.T, dir string) {
 	t.Helper()
 	def = &store{
-		creds:     map[string]*Cred{},
-		workers:   map[string]*Worker{},
-		domains:   map[string]*Domain{},
-		failovers: map[string]*FailoverRule{},
+		creds:   map[string]*Cred{},
+		workers: map[string]*Worker{},
+		domains: map[string]*Domain{},
 	}
-	resetFailoverState()
 	if err := Init(filepath.Join(dir, "cloudflare.json")); err != nil {
 		t.Fatal(err)
 	}

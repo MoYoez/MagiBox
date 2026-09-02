@@ -83,8 +83,8 @@ func newService(runtime config.OIDCConfig, client identityClient, tokenCipher *t
 	}, nil
 }
 
-func (s *service) issueBindingURL(telegramID int64) (string, error) {
-	ticket, err := s.store.issueTicket(telegramID, s.now())
+func (s *service) issueBindingURL(account telegramAccount) (string, error) {
+	ticket, err := s.store.issueTicket(account, s.now())
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +98,7 @@ func (s *service) issueBindingURL(telegramID int64) (string, error) {
 	return parsed.String(), nil
 }
 
-func (s *service) previewTicket(ticket string) (int64, error) {
+func (s *service) previewTicket(ticket string) (telegramAccount, error) {
 	return s.store.lookupTicket(ticket, s.now())
 }
 
